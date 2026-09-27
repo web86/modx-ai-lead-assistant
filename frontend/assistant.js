@@ -1,0 +1,321 @@
+document.addEventListener('DOMContentLoaded', () => {
+    const assistant = document.getElementById('fwAssistant');
+
+    if (!assistant) {
+        return;
+    }
+
+    const endpoint = assistant.dataset.endpoint || '/assets/components/assistant/api/chat.php';
+    const trigger = document.getElementById('fwAssistantTrigger');
+    const windowElement = document.getElementById('fwAssistantWindow');
+    const closeButton = assistant.querySelector('.fw-assistant-close');
+    const emailForm = assistant.querySelector('.fw-assistant-email-form');
+    const emailCard = assistant.querySelector('.fw-assistant-email-card');
+    const body = document.getElementById('fwAssistantBody');
+    const messages = document.getElementById('fwAssistantMessages');
+    const chatForm = document.getElementById('fwAssistantChatForm');
+    const chatInput = document.getElementById('fwAssistantInput');
+    const sendButton = assistant.querySelector('.fw-assistant-send');
+
+    let isReplying = false;
+    let typingElement = null;
+
+    function isValidEmail(email) {
+        email = String(email || '').trim();
+
+        if (email.length < 5 || email.length > 254) {
+            return false;
+        }
+
+        return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i.test(email);
+    }
+
+    function openAssistant() {
+        assistant.classList.add('is-open');
+        trigger.setAttribute('aria-expanded', 'true');
+        trigger.setAttribute('aria-label', 'Закрыть чат');
+        windowElement.setAttribute('aria-hidden', 'false');
+        localStorage.setItem('fwAssistantOpened', '1');
+
+        if (assistant.classList.contains('is-chatting') && !chatInput.disabled) {
+            setTimeout(() => chatInput.focus(), 350);
+        }
+    }
+
+    function closeAssistant() {
+        assistant.classList.remove('is-open');
+        trigger.setAttribute('aria-expanded', 'false');
+        trigger.setAttribute('aria-label', 'Открыть чат');
+        windowElement.setAttribute('aria-hidden', 'true');
+    }
+
+    function toggleAssistant() {
+        assistant.classList.contains('is-open') ? closeAssistant() : openAssistant();
+    }
+
+    function scrollToBottom(smooth = true) {
+        requestAnimationFrame(() => {
+            body.scrollTo({
+                top: body.scrollHeight,
+                behavior: smooth ? 'smooth' : 'auto'
+            });
+        });
+    }
+
+    function createAssistantAvatar() {
+        const avatar = document.createElement('div');
+        avatar.className = 'fw-assistant-chat-avatar';
+        avatar.appendChild(document.createElement('span'));
+        return avatar;
+    }
+
+    function addMessage(role, text) {
+        const row = document.createElement('div');
+        row.className = `fw-assistant-chat-row ${role === 'assistant' ? 'is-assistant' : 'is-user'}`;
+
+        if (role === 'assistant') {
+            row.appendChild(createAssistantAvatar());
+        }
+
+        const bubble = document.createElement('div');
+        bubble.className = 'fw-assistant-chat-bubble';
+        bubble.textContent = text;
+        row.appendChild(bubble);
+        messages.appendChild(row);
+        scrollToBottom();
+        return row;
+    }
+
+    function showTyping() {
+        if (typingElement) {
+            return;
+        }
+
+        const row = document.createElement('div');
+        row.className = 'fw-assistant-chat-row is-assistant';
+        row.appendChild(createAssistantAvatar());
+
+        const bubble = document.createElement('div');
+        bubble.className = 'fw-assistant-chat-bubble';
+
+        const typing = document.createElement('div');
+        typing.className = 'fw-assistant-typing';
+
+        for (let i = 0; i < 3; i += 1) {
+            typing.appendChild(document.createElement('span'));
+        }
+
+        bubble.appendChild(typing);
+        row.appendChild(bubble);
+        messages.appendChild(row);
+        typingElement = row;
+        scrollToBottom();
+    }
+
+    function hideTyping() {
+        if (!typingElement) {
+            return;
+        }
+
+        typingElement.remove();
+        typingElement = null;
+    }
+
+    function finishChat() {
+        chatInput.disabled = true;
+        chatInput.placeholder = 'Запрос передан ✓';
+        sendButton.disabled = true;
+        sessionStorage.setItem('fwAssistantHandoffSent', '1');
+    }
+
+    function startChat(restored = false) {
+        assistant.classList.add('is-chatting');
+        emailCard.style.display = 'none';
+
+        if (sessionStorage.getItem('fwAssistantHandoffSent') === '1') {
+            finishChat();
+            return;
+        }
+
+        if (restored) {
+            addMessage('assistant', 'С возвращением! Чем могу помочь?');
+            return;
+        }
+
+        showTyping();
+
+        setTimeout(() => {
+            hideTyping();
+            addMessage('assistant', 'Отлично! Чем могу помочь? Расскажите немного о вашей задаче.');
+            chatInput.focus();
+        }, 650);
+    }
+
+    function resizeTextarea() {
+        chatInput.style.height = 'auto';
+        chatInput.style.height = `${Math.min(chatInput.scrollHeight, 110)}px`;
+    }
+
+    function updateSendButton() {
+        sendButton.disabled = !chatInput.value.trim() || isReplying || chatInput.disabled;
+    }
+
+    async function getAssistantReply(message) {
+        const email = sessionStorage.getItem('fwAssistantEmail');
+
+        if (!email || !isValidEmail(email)) {
+            throw new Error('Email is missing or invalid');
+        }
+
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json'
+            },
+            body: JSON.stringify({
+                email,
+                message,
+                page_url: window.location.href
+            })
+        });
+
+        let data;
+
+        try {
+            data = await response.json();
+        } catch (error) {
+            throw new Error('Invalid server response');
+        }
+
+        if (!response.ok || !data.ok) {
+            if (response.status === 429) {
+                throw new Error('Assistant temporarily busy');
+            }
+
+            throw new Error(data.error || 'Assistant request failed');
+        }
+
+        if (typeof data.message !== 'string' || !data.message.trim()) {
+            throw new Error('Empty assistant response');
+        }
+
+        return {
+            message: data.message.trim(),
+            handoffSent: data.handoff_sent === true,
+            channels: data.handoff_channels || null
+        };
+    }
+
+    trigger.addEventListener('click', toggleAssistant);
+    closeButton.addEventListener('click', closeAssistant);
+
+    document.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && assistant.classList.contains('is-open')) {
+            closeAssistant();
+        }
+    });
+
+    emailForm.addEventListener('submit', event => {
+        event.preventDefault();
+
+        const input = emailForm.querySelector('input[type="email"]');
+        const email = input.value.trim();
+
+        input.classList.remove('is-invalid');
+        emailForm.querySelector('.fw-assistant-email-error')?.remove();
+
+        if (!isValidEmail(email)) {
+            input.classList.add('is-invalid');
+
+            const error = document.createElement('div');
+            error.className = 'fw-assistant-email-error';
+            error.textContent = 'Пожалуйста, укажите корректный email.';
+            input.insertAdjacentElement('afterend', error);
+            input.focus();
+            return;
+        }
+
+        sessionStorage.setItem('fwAssistantEmail', email);
+        sessionStorage.removeItem('fwAssistantHandoffSent');
+        emailCard.classList.add('is-leaving');
+
+        setTimeout(() => startChat(false), 250);
+    });
+
+    chatInput.addEventListener('input', () => {
+        resizeTextarea();
+        updateSendButton();
+    });
+
+    chatInput.addEventListener('keydown', event => {
+        if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault();
+
+            if (!sendButton.disabled) {
+                chatForm.requestSubmit();
+            }
+        }
+    });
+
+    chatForm.addEventListener('submit', async event => {
+        event.preventDefault();
+
+        const text = chatInput.value.trim();
+
+        if (!text || isReplying || chatInput.disabled) {
+            return;
+        }
+
+        addMessage('user', text);
+        chatInput.value = '';
+        resizeTextarea();
+        isReplying = true;
+        updateSendButton();
+        showTyping();
+
+        try {
+            const result = await getAssistantReply(text);
+            hideTyping();
+            addMessage('assistant', result.message);
+
+            if (result.handoffSent) {
+                finishChat();
+            }
+        } catch (error) {
+            hideTyping();
+
+            if (error.message === 'Assistant temporarily busy') {
+                addMessage('assistant', 'Сервис временно занят. Попробуйте отправить сообщение ещё раз через минуту.');
+            } else {
+                addMessage('assistant', 'Не удалось получить ответ. Попробуйте ещё раз.');
+            }
+
+            console.error(error);
+        } finally {
+            isReplying = false;
+            updateSendButton();
+
+            if (!chatInput.disabled) {
+                chatInput.focus();
+            }
+        }
+    });
+
+    const savedEmail = sessionStorage.getItem('fwAssistantEmail');
+
+    if (savedEmail && isValidEmail(savedEmail)) {
+        startChat(true);
+    } else if (savedEmail) {
+        sessionStorage.removeItem('fwAssistantEmail');
+        sessionStorage.removeItem('fwAssistantHandoffSent');
+    }
+
+    if (!localStorage.getItem('fwAssistantOpened')) {
+        setTimeout(() => {
+            trigger.classList.add('fw-assistant-attention');
+            setTimeout(() => trigger.classList.remove('fw-assistant-attention'), 1500);
+        }, 4000);
+    }
+});

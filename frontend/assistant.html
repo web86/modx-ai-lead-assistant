@@ -1,0 +1,135 @@
+<link rel="stylesheet" href="/assets/components/assistant/css/assistant.css">
+
+<div
+    class="fw-assistant"
+    id="fwAssistant"
+    data-endpoint="/assets/components/assistant/api/chat.php"
+>
+    <div
+        class="fw-assistant-window"
+        id="fwAssistantWindow"
+        role="dialog"
+        aria-label="Чат с виртуальным помощником"
+        aria-hidden="true"
+    >
+        <div class="fw-assistant-header">
+            <div class="fw-assistant-profile">
+                <div class="fw-assistant-avatar">
+                    <span class="fw-assistant-avatar-core"></span>
+                </div>
+
+                <div class="fw-assistant-profile-text">
+                    <strong>AI Assistant</strong>
+                    <span><i></i> Онлайн</span>
+                </div>
+            </div>
+
+            <button class="fw-assistant-close" type="button" aria-label="Свернуть чат">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M6 9l6 6 6-6"/>
+                </svg>
+            </button>
+        </div>
+
+        <div class="fw-assistant-body" id="fwAssistantBody">
+            <div class="fw-assistant-messages" id="fwAssistantMessages" aria-live="polite">
+                <div class="fw-assistant-welcome">
+                    <div class="fw-assistant-mini-avatar"><span></span></div>
+
+                    <div class="fw-assistant-message">
+                        <p>Привет! 👋 Я виртуальный помощник.</p>
+                        <p>Могу рассказать об услугах и помочь сформулировать вашу задачу.</p>
+                    </div>
+                </div>
+
+                <div class="fw-assistant-email-card">
+                    <div class="fw-assistant-email-icon">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M4 6h16v12H4z"/>
+                            <path d="M4 7l8 6 8-6"/>
+                        </svg>
+                    </div>
+
+                    <div>
+                        <strong>Начнём?</strong>
+                        <p>Оставьте email, чтобы мы могли связаться с вами после разговора.</p>
+                    </div>
+
+                    <form class="fw-assistant-email-form" novalidate>
+                        <input
+                            type="email"
+                            name="email"
+                            placeholder="your@email.com"
+                            autocomplete="email"
+                            maxlength="254"
+                            required
+                        >
+
+                        <button type="submit">
+                            Продолжить
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M5 12h14"/>
+                                <path d="M14 7l5 5-5 5"/>
+                            </svg>
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div class="fw-assistant-footer">
+            <div class="fw-assistant-composer">
+                <form class="fw-assistant-chat-form" id="fwAssistantChatForm">
+                    <textarea
+                        id="fwAssistantInput"
+                        rows="1"
+                        maxlength="2000"
+                        placeholder="Введите сообщение..."
+                        aria-label="Сообщение"
+                    ></textarea>
+
+                    <button
+                        class="fw-assistant-send"
+                        type="submit"
+                        aria-label="Отправить сообщение"
+                        disabled
+                    >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M4 12L20 4l-5 16-3.5-6.5L4 12z"/>
+                            <path d="M11.5 13.5L20 4"/>
+                        </svg>
+                    </button>
+                </form>
+            </div>
+
+            <div class="fw-assistant-powered">
+                <span class="fw-assistant-powered-dot"></span>
+                AI assistant
+            </div>
+        </div>
+    </div>
+
+    <button
+        class="fw-assistant-trigger"
+        id="fwAssistantTrigger"
+        type="button"
+        aria-label="Открыть чат"
+        aria-expanded="false"
+    >
+        <span class="fw-assistant-pulse"></span>
+
+        <span class="fw-assistant-trigger-inner">
+            <span class="fw-assistant-orb"><span></span></span>
+
+            <svg class="fw-assistant-trigger-close-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M6 6l12 12M18 6L6 18"/>
+            </svg>
+        </span>
+
+        <span class="fw-assistant-notification">1</span>
+    </button>
+
+    <div class="fw-assistant-hint">Спросить помощника</div>
+</div>
+
+<script src="/assets/components/assistant/js/assistant.js" defer></script>

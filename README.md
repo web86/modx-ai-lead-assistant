@@ -1,0 +1,253 @@
+# MODX AI Lead Assistant
+
+A lightweight AI lead-assistant widget for MODX 2. Visitors can start a conversation, describe a project, answer a few clarifying questions, and hand the request off to the site owner. The owner receives the lead by email and optionally in Telegram.
+
+The example uses:
+
+- Vanilla HTML/CSS/JavaScript for the chat widget
+- MODX 2 + PHP for session state, validation, lead handoff, and email
+- Google Cloud Run as a small outbound API gateway
+- Groq Responses API with `openai/gpt-oss-120b`
+- Telegram Bot API for instant lead notifications
+
+## Architecture
+
+```text
+Visitor
+  |
+  v
+Vanilla JS chat widget
+  |
+  v
+MODX 2 / chat.php
+  |\
+  | \--> MODX mail -> Email
+  |
+  v
+Google Cloud Run
+  |\
+  | \--> Telegram Bot API
+  |
+  v
+Groq Responses API
+  |
+  v
+openai/gpt-oss-120b
+```
+
+The browser never receives Groq, Telegram, or gateway secrets.
+
+## Repository structure
+
+```text
+frontend/
+  assistant.html
+  assistant.css
+  assistant.js
+modx/
+  chat.php
+cloud-run/
+  index.js
+  package.json
+  .env.example
+```
+
+## 1. Frontend
+
+Copy the files from `frontend/` into your site and include the CSS and JavaScript. The root element contains the server endpoint:
+
+```html
+<div
+    class="fw-assistant"
+    id="fwAssistant"
+    data-endpoint="/assets/components/assistant/api/chat.php"
+>
+```
+
+The widget validates the visitor email before starting the conversation, keeps it only in `sessionStorage`, supports Enter/Shift+Enter, and disables the composer after a successful handoff.
+
+## 2. MODX 2 settings
+
+Create these System Settings:
+
+| Setting | Example |
+| --- | --- |
+| `portfolio_assistant.enabled` | `1` |
+| `portfolio_assistant.owner_name` | `Konstantin` |
+| `portfolio_assistant.model` | `openai/gpt-oss-120b` |
+| `portfolio_assistant.email_to` | `you@example.com` |
+| `portfolio_assistant.max_messages` | `10` |
+| `portfolio_assistant.gateway_url` | `https://YOUR-SERVICE.run.app/chat` |
+| `portfolio_assistant.gateway_secret` | long random secret |
+| `portfolio_assistant.telegram_enabled` | `1` |
+| `portfolio_assistant.telegram_gateway_url` | `https://YOUR-SERVICE.run.app/telegram` |
+
+`portfolio_assistant.gateway_secret` is server-side only. Never render it into a template or JavaScript.
+
+Copy `modx/chat.php` to:
+
+```text
+/assets/components/assistant/api/chat.php
+```
+
+The example assumes that location when bootstrapping MODX.
+
+## 3. MODX email
+
+The example uses the MODX 2 mail service:
+
+```php
+$mail = $modx->getService('mail', 'mail.modPHPMailer');
+```
+
+Configure MODX email/SMTP normally before testing. The visitor email is used as `Reply-To`.
+
+## 4. Cloud Run gateway
+
+The gateway exposes:
+
+```text
+GET  /health
+POST /chat
+POST /telegram
+```
+
+`/chat` and `/telegram` require:
+
+```http
+X-Gateway-Secret: YOUR_SECRET
+```
+
+Install:
+
+```bash
+cd cloud-run
+npm install
+```
+
+Required environment variables:
+
+```text
+GROQ_API_KEY
+GATEWAY_SECRET
+TELEGRAM_BOT_TOKEN
+TELEGRAM_CHAT_ID
+```
+
+Prefer Google Secret Manager for API keys.
+
+### Example Secret Manager setup
+
+```bash
+read -s GROQ_API_KEY
+printf '%s' "$GROQ_API_KEY" | \
+  gcloud secrets create portfolio-groq-key --data-file=-
+
+read -s GATEWAY_SECRET
+printf '%s' "$GATEWAY_SECRET" | \
+  gcloud secrets create portfolio-gateway-secret --data-file=-
+
+read -s TELEGRAM_BOT_TOKEN
+printf '%s' "$TELEGRAM_BOT_TOKEN" | \
+  gcloud secrets create portfolio-telegram-bot-token --data-file=-
+```
+
+Grant the Cloud Run service account `roles/secretmanager.secretAccessor` for each secret.
+
+### Deploy
+
+```bash
+gcloud run deploy portfolio-assistant-gateway \
+  --source . \
+  --region=europe-west1 \
+  --allow-unauthenticated \
+  --service-account="YOUR_SERVICE_ACCOUNT" \
+  --set-secrets="GROQ_API_KEY=portfolio-groq-key:1,GATEWAY_SECRET=portfolio-gateway-secret:1,TELEGRAM_BOT_TOKEN=portfolio-telegram-bot-token:1" \
+  --set-env-vars="TELEGRAM_CHAT_ID=YOUR_TELEGRAM_CHAT_ID" \
+  --memory=256Mi \
+  --cpu=1 \
+  --min=0 \
+  --max=3 \
+  --timeout=45s
+```
+
+## 5. Test the gateway
+
+Health:
+
+```bash
+curl "$GATEWAY_URL/health"
+```
+
+Groq:
+
+```bash
+curl -sS \
+  -X POST \
+  "$GATEWAY_URL/chat" \
+  -H "Content-Type: application/json" \
+  -H "X-Gateway-Secret: $GATEWAY_SECRET" \
+  -d '{
+    "model": "openai/gpt-oss-120b",
+    "instructions": "Reply briefly in English.",
+    "input": [{"role":"user","content":"Hello. Who are you?"}],
+    "max_output_tokens": 200
+  }'
+```
+
+Telegram:
+
+```bash
+curl -sS \
+  -X POST \
+  "$GATEWAY_URL/telegram" \
+  -H "Content-Type: application/json" \
+  -H "X-Gateway-Secret: $GATEWAY_SECRET" \
+  -d '{
+    "name": "John",
+    "email": "john@example.com",
+    "website": "example.com",
+    "request": "Build a WordPress website",
+    "summary": "The client needs a small WordPress website.",
+    "page_url": "https://example.com/"
+  }'
+```
+
+## 6. Lead handoff
+
+The model returns structured JSON:
+
+```json
+{
+  "reply": "...",
+  "ready_to_handoff": false,
+  "handoff_message": "",
+  "lead": {
+    "name": null,
+    "website": null,
+    "request": "...",
+    "summary": "..."
+  }
+}
+```
+
+The model may decide that a lead is ready, but it is not allowed to claim that delivery already happened. The server performs the real delivery. Only after email or Telegram succeeds does the visitor receive the final handoff message.
+
+## 7. Reliability details
+
+- The current visitor message is committed to PHP session history only after the request completes successfully, preventing duplicate history after retries.
+- The visitor email is injected into server-controlled AI instructions so the model does not ask for it again.
+- Conversation history is bounded with `portfolio_assistant.max_messages`.
+- User messages are rendered with `textContent`, not `innerHTML`.
+- Groq and Telegram credentials remain in Cloud Run / Secret Manager.
+- Email and Telegram are independent channels; if either succeeds, the lead is considered delivered.
+
+## 8. Security notes
+
+This is an educational MVP. For heavier production traffic consider durable rate limiting, abuse challenges, persistent lead storage, stronger observability, automated secret rotation, and IAM-authenticated Cloud Run calls when your hosting environment supports them.
+
+Never commit real API keys, Telegram bot tokens, gateway secrets, visitor data, or production configuration.
+
+## License
+
+MIT.

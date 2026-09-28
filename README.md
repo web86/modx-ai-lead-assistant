@@ -1,11 +1,11 @@
-# MODX AI Lead Assistant
+# AI Lead Assistant for MODX and WordPress
 
-A lightweight AI lead-assistant widget for MODX 2. Visitors can start a conversation, describe a project, answer a few clarifying questions, and hand the request off to the site owner. The owner receives the lead by email and optionally in Telegram.
+A lightweight AI lead-assistant widget with adapters for MODX 2 and WordPress. Visitors can start a conversation, describe a project, answer a few clarifying questions, and hand the request off to the site owner. The owner receives the lead by email and optionally in Telegram.
 
 The example uses:
 
 - Vanilla HTML/CSS/JavaScript for the chat widget
-- MODX 2 + PHP for session state, validation, lead handoff, and email
+- MODX 2 or WordPress as the CMS-side adapter for validation, conversation state, lead handoff, and email
 - Google Cloud Run as a small outbound API gateway
 - Groq Responses API with `openai/gpt-oss-120b`
 - Telegram Bot API for instant lead notifications
@@ -18,12 +18,17 @@ Visitor
   v
 Vanilla JS chat widget
   |
-  v
-MODX 2 / chat.php
-  |\
-  | \--> MODX mail -> Email
-  |
-  v
+  +----------------------+
+  |                      |
+  v                      v
+MODX 2               WordPress
+chat.php              REST adapter
+  |                      |
+  +----------+-----------+
+             |
+             +----> CMS mail -> Email
+             |
+             v
 Google Cloud Run
   |\
   | \--> Telegram Bot API
@@ -46,6 +51,9 @@ frontend/
   assistant.js
 modx/
   chat.php
+wordpress/
+  web86-ai-lead-assistant.php
+  README.md
 cloud-run/
   index.js
   package.json
@@ -91,6 +99,59 @@ Copy `modx/chat.php` to:
 ```
 
 The example assumes that location when bootstrapping MODX.
+
+
+## WordPress adapter
+
+The same Cloud Run deployment can also be used by WordPress without changing `cloud-run/index.js`.
+
+Install the plugin from:
+
+```text
+wordpress/web86-ai-lead-assistant.php
+```
+
+into:
+
+```text
+wp-content/plugins/web86-ai-lead-assistant/web86-ai-lead-assistant.php
+```
+
+Activate it, then open:
+
+```text
+Settings → AI Lead Assistant
+```
+
+Configure the same Cloud Run `/chat` and `/telegram` URLs and the same gateway secret.
+
+For production, prefer keeping the gateway secret outside the database:
+
+```php
+define('WEB86_AI_GATEWAY_SECRET', 'your-long-random-secret');
+```
+
+The WordPress plugin exposes:
+
+```text
+POST /wp-json/web86-ai-lead/v1/chat
+```
+
+Use that value as the frontend `data-endpoint`:
+
+```html
+<div
+    class="fw-assistant"
+    id="fwAssistant"
+    data-endpoint="/wp-json/web86-ai-lead/v1/chat"
+>
+```
+
+The frontend now sends a random `conversation_id` for both CMS adapters. MODX may continue using PHP session state, while WordPress stores its conversation state in Transients.
+
+WordPress lead email is sent with `wp_mail()`; Telegram continues through the same Cloud Run `/telegram` endpoint, so the Telegram bot token stays in Google Secret Manager.
+
+See `wordpress/README.md` for the full setup.
 
 ## 3. MODX email
 

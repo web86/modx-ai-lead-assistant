@@ -123,3 +123,52 @@ The protected layer remains in PHP and takes precedence if there is a conflict. 
 Existing installations automatically receive the previous business rules as defaults until the settings are saved.
 
 The field is limited to 12,000 characters.
+
+
+## Troubleshooting: REST API returns 301
+
+If the chat widget fails with:
+
+```text
+Assistant request failed
+```
+
+and the request to:
+
+```text
+POST /wp-json/web86-ai-lead/v1/chat
+```
+
+returns:
+
+```text
+HTTP 301
+Location: https://example.com
+X-Redirect-By: WordPress
+```
+
+check whether a WordPress optimization or security plugin is blocking the REST / JSON API for unauthenticated visitors.
+
+One confirmed example is **Clearfy**. When its REST API / JSON API blocking option is enabled, the public assistant endpoint may be redirected to the site homepage instead of reaching the plugin's REST callback.
+
+Since the assistant endpoint is intentionally public for website visitors, disable the REST / JSON API blocking option in Clearfy, then test the request again.
+
+After the change, the endpoint should respond with JSON instead of a redirect:
+
+```json
+{
+  "ok": true,
+  "message": "...",
+  "handoff_sent": false
+}
+```
+
+If a cache or optimization plugin is active, clear its cache after changing the setting.
+
+Before debugging Cloud Run, Groq, or the assistant prompt, always confirm first that:
+
+```text
+/wp-json/web86-ai-lead/v1/chat
+```
+
+returns a normal JSON response and is not being redirected.

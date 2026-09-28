@@ -84,3 +84,42 @@ Telegram Bot API
 ```
 
 The Telegram bot token remains in Google Secret Manager and is never stored in WordPress.
+
+
+## AI rules
+
+Version 1.1.0 adds a configurable **AI rules** textarea under:
+
+```text
+Settings → AI Lead Assistant
+```
+
+Use this field for business-specific behavior such as:
+
+- services and technologies;
+- tone and response length;
+- languages;
+- qualification questions;
+- pricing policy;
+- deadlines and estimation policy;
+- what the assistant should and should not ask.
+
+The plugin combines the editable rules with a protected system layer.
+
+Editable rules:
+
+```text
+CUSTOM ASSISTANT RULES
+```
+
+Protected rules:
+
+```text
+SYSTEM SAFETY AND HANDOFF CONTRACT
+```
+
+The protected layer remains in PHP and takes precedence if there is a conflict. It covers prompt-injection resistance, secret protection, accuracy constraints, structured lead handoff, and the rule that the assistant must not claim a request was delivered before email or Telegram actually succeeds.
+
+Existing installations automatically receive the previous business rules as defaults until the settings are saved.
+
+The field is limited to 12,000 characters.

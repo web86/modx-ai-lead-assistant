@@ -20,6 +20,36 @@ document.addEventListener('DOMContentLoaded', () => {
     let isReplying = false;
     let typingElement = null;
 
+    function createConversationId() {
+        if (window.crypto?.getRandomValues) {
+            const bytes = new Uint8Array(18);
+            window.crypto.getRandomValues(bytes);
+
+            return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+        }
+
+        return [
+            Date.now().toString(36),
+            Math.random().toString(36).slice(2),
+            Math.random().toString(36).slice(2)
+        ].join('_');
+    }
+
+    function getConversationId() {
+        let conversationId = sessionStorage.getItem('fwAssistantConversationId');
+
+        if (!conversationId) {
+            conversationId = createConversationId();
+
+            sessionStorage.setItem(
+                'fwAssistantConversationId',
+                conversationId
+            );
+        }
+
+        return conversationId;
+    }
+
     function isValidEmail(email) {
         email = String(email || '').trim();
 
@@ -177,7 +207,8 @@ document.addEventListener('DOMContentLoaded', () => {
             body: JSON.stringify({
                 email,
                 message,
-                page_url: window.location.href
+                page_url: window.location.href,
+                conversation_id: getConversationId()
             })
         });
 
@@ -239,6 +270,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
         sessionStorage.setItem('fwAssistantEmail', email);
         sessionStorage.removeItem('fwAssistantHandoffSent');
+
+        if (!sessionStorage.getItem('fwAssistantConversationId')) {
+            sessionStorage.setItem(
+                'fwAssistantConversationId',
+                createConversationId()
+            );
+        }
         emailCard.classList.add('is-leaving');
 
         setTimeout(() => startChat(false), 250);
@@ -310,6 +348,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } else if (savedEmail) {
         sessionStorage.removeItem('fwAssistantEmail');
         sessionStorage.removeItem('fwAssistantHandoffSent');
+        sessionStorage.removeItem('fwAssistantConversationId');
     }
 
     if (!localStorage.getItem('fwAssistantOpened')) {

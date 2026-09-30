@@ -1,11 +1,11 @@
-# AI Lead Assistant for MODX and WordPress
+# AI Lead Assistant for MODX 2, MODX 3, and WordPress
 
-A lightweight AI lead-assistant widget with adapters for MODX 2 and WordPress. Visitors can start a conversation, describe a project, answer a few clarifying questions, and hand the request off to the site owner. The owner receives the lead by email and optionally in Telegram.
+A lightweight AI lead-assistant widget with adapters for MODX 2, MODX 3, and WordPress. Visitors can start a conversation, describe a project, answer a few clarifying questions, and hand the request off to the site owner. The owner receives the lead by email and optionally in Telegram.
 
 The example uses:
 
 - Vanilla HTML/CSS/JavaScript for the chat widget
-- MODX 2 or WordPress as the CMS-side adapter for validation, conversation state, lead handoff, and email
+- MODX 2, MODX 3, or WordPress as the CMS-side adapter for validation, conversation state, lead handoff, and email
 - Google Cloud Run as a small outbound API gateway
 - Groq Responses API with `openai/gpt-oss-120b`
 - Telegram Bot API for instant lead notifications
@@ -18,17 +18,17 @@ Visitor
   v
 Vanilla JS chat widget
   |
-  +----------------------+
-  |                      |
-  v                      v
-MODX 2               WordPress
-chat.php              REST adapter
-  |                      |
-  +----------+-----------+
-             |
-             +----> CMS mail -> Email
-             |
-             v
+  +-----------+-----------+
+  |           |           |
+  v           v           v
+MODX 2      MODX 3     WordPress
+chat.php    chat.php    REST adapter
+  |           |           |
+  +-----------+-----------+
+              |
+              +----> CMS mail -> Email
+              |
+              v
 Google Cloud Run
   |\
   | \--> Telegram Bot API
@@ -51,6 +51,9 @@ frontend/
   assistant.js
 modx/
   chat.php
+modx3/
+  chat.php
+  README.md
 wordpress/
   web86-ai-lead-assistant.php
   README.md
@@ -99,6 +102,67 @@ Copy `modx/chat.php` to:
 ```
 
 The example assumes that location when bootstrapping MODX.
+
+
+## MODX 3 adapter
+
+The same frontend and Cloud Run deployment can also be used with MODX 3.
+
+Copy:
+
+```text
+modx3/chat.php
+```
+
+to:
+
+```text
+/assets/components/assistant/api/chat.php
+```
+
+MODX 3 uses the same System Settings as MODX 2:
+
+```text
+portfolio_assistant.enabled
+portfolio_assistant.owner_name
+portfolio_assistant.model
+portfolio_assistant.email_to
+portfolio_assistant.max_messages
+portfolio_assistant.gateway_url
+portfolio_assistant.gateway_secret
+portfolio_assistant.telegram_enabled
+portfolio_assistant.telegram_gateway_url
+```
+
+The MODX 3 adapter differs mainly in bootstrap and mail integration:
+
+```php
+use MODX\Revolution\modX;
+use MODX\Revolution\Mail\modMail;
+use MODX\Revolution\Mail\modPHPMailer;
+
+require_once $rootPath . '/config.core.php';
+require_once MODX_CORE_PATH . 'vendor/autoload.php';
+
+$modx = new modX();
+$modx->initialize('web');
+
+$mail = new modPHPMailer($modx);
+```
+
+This uses MODX 3's Composer autoloader and namespaced mail classes instead of the legacy MODX 2 service-loading pattern.
+
+The frontend endpoint remains:
+
+```html
+<div
+    class="fw-assistant"
+    id="fwAssistant"
+    data-endpoint="/assets/components/assistant/api/chat.php"
+>
+```
+
+See `modx3/README.md` for the full setup.
 
 
 ## WordPress adapter
@@ -155,7 +219,7 @@ See `wordpress/README.md` for the full setup.
 
 ## 3. MODX email
 
-The example uses the MODX 2 mail service:
+The MODX 2 adapter uses the legacy MODX mail service:
 
 ```php
 $mail = $modx->getService('mail', 'mail.modPHPMailer');

@@ -56,6 +56,32 @@ Create these MODX System Settings:
 
 The gateway secret is server-side only. Never render it into a Chunk, template, JavaScript, or page source.
 
+## AI rules Chunk
+
+Create a MODX Chunk with this exact name:
+
+```text
+portfolio_assistant.ai_rules
+```
+
+Paste the contents of:
+
+```text
+shared/portfolio_assistant.ai_rules.txt
+```
+
+into the Chunk.
+
+The adapter reads the raw Chunk `snippet` field, so the rules are not rendered through the MODX parser before they are sent to the AI.
+
+Use this Chunk for business-specific instructions such as services, tone, languages, qualification questions, pricing policy, and other assistant behavior.
+
+Security rules, prompt-injection resistance, accuracy constraints, and the handoff contract remain protected in `chat.php` and override the editable Chunk when necessary.
+
+If the Chunk is missing or empty, the adapter falls back to a minimal safe business prompt and writes a warning to the MODX error log.
+
+The Chunk content is limited to 12,000 characters when loaded.
+
 ## Frontend endpoint
 
 Use the shared frontend from `../frontend/` with:

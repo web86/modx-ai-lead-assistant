@@ -51,9 +51,12 @@ frontend/
   assistant.js
 modx/
   chat.php
+  README.md
 modx3/
   chat.php
   README.md
+shared/
+  portfolio_assistant.ai_rules.txt
 wordpress/
   web86-ai-lead-assistant.php
   README.md
@@ -102,6 +105,22 @@ Copy `modx/chat.php` to:
 ```
 
 The example assumes that location when bootstrapping MODX.
+
+### Editable AI rules in MODX
+
+Both MODX 2 and MODX 3 read business-specific AI instructions from a Chunk named:
+
+```text
+portfolio_assistant.ai_rules
+```
+
+A ready-to-paste template is included at:
+
+```text
+shared/portfolio_assistant.ai_rules.txt
+```
+
+The adapters read the raw Chunk content instead of rendering it, so MODX tags inside the text are not processed. Security, accuracy, and handoff rules remain protected in PHP.
 
 
 ## MODX 3 adapter

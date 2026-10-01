@@ -140,7 +140,16 @@ function assistantBool($value): bool
 
 function assistantLoadAiRules($modx): string
 {
-    $chunkName = 'portfolio_assistant.ai_rules';
+    $chunkName = trim((string)$modx->getOption(
+        'portfolio_assistant.ai_rules',
+        null,
+        'portfolio_assistant.ai_rules'
+    ));
+
+    if ($chunkName === '') {
+        $chunkName = 'portfolio_assistant.ai_rules';
+    }
+
     $chunk = $modx->getObject('modChunk', ['name' => $chunkName]);
 
     if (!$chunk) {
@@ -155,7 +164,12 @@ function assistantLoadAiRules($modx): string
         return 'Be helpful, concise, and ask only for information needed to understand the visitor request. Never invent prices, deadlines, projects, clients, or guarantees.';
     }
 
-    return mb_substr($rules, 0, 12000, 'UTF-8');
+    if (mb_strlen($rules, 'UTF-8') > 12000) {
+        assistantLog($modx, 'Chunk ' . $chunkName . ' exceeded 12000 characters and was truncated.');
+        $rules = mb_substr($rules, 0, 12000, 'UTF-8');
+    }
+
+    return $rules;
 }
 
 function assistantTrimHistory(array $history, int $limit): array

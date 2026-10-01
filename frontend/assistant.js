@@ -18,6 +18,40 @@ document.addEventListener('DOMContentLoaded', () => {
     const chatInput = document.getElementById('fwAssistantInput');
     const sendButton = assistant.querySelector('.fw-assistant-send');
 
+    const aiText = {
+        welcomeBack:
+            assistant.dataset.textWelcomeBack ||
+            'Welcome back! How can I help?',
+
+        chatStart:
+            assistant.dataset.textChatStart ||
+            'Great! How can I help? Tell me a little about what you need.',
+
+        emailError:
+            assistant.dataset.textEmailError ||
+            'Please enter a valid email.',
+
+        busy:
+            assistant.dataset.textBusy ||
+            'The service is temporarily busy. Please try again in a minute.',
+
+        requestError:
+            assistant.dataset.textRequestError ||
+            'Could not get a response. Please try again.',
+
+        handoffSent:
+            assistant.dataset.textHandoffSent ||
+            'Request sent ✓',
+
+        openChat:
+            assistant.dataset.textOpenChat ||
+            'Open chat',
+
+        closeChat:
+            assistant.dataset.textCloseChat ||
+            'Close chat'
+    };
+
     let isReplying = false;
     let typingElement = null;
 
@@ -64,7 +98,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function openAssistant() {
         assistant.classList.add('is-open');
         trigger.setAttribute('aria-expanded', 'true');
-        trigger.setAttribute('aria-label', 'Закрыть чат');
+        trigger.setAttribute('aria-label', aiText.closeChat);
         windowElement.setAttribute('aria-hidden', 'false');
         localStorage.setItem('fwAssistantOpened', '1');
 
@@ -76,7 +110,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function closeAssistant() {
         assistant.classList.remove('is-open');
         trigger.setAttribute('aria-expanded', 'false');
-        trigger.setAttribute('aria-label', 'Открыть чат');
+        trigger.setAttribute('aria-label', aiText.openChat);
         windowElement.setAttribute('aria-hidden', 'true');
     }
 
@@ -154,7 +188,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function finishChat() {
         chatInput.disabled = true;
-        chatInput.placeholder = 'Запрос передан ✓';
+        chatInput.placeholder = aiText.handoffSent;
         sendButton.disabled = true;
         sessionStorage.setItem('fwAssistantHandoffSent', '1');
     }
@@ -169,7 +203,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (restored) {
-            addMessage('assistant', 'С возвращением! Чем могу помочь?');
+            addMessage('assistant', aiText.welcomeBack);
             return;
         }
 
@@ -177,7 +211,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         setTimeout(() => {
             hideTyping();
-            addMessage('assistant', 'Отлично! Чем могу помочь? Расскажите немного о вашей задаче.');
+            addMessage('assistant', aiText.chatStart);
             chatInput.focus();
         }, 650);
     }
@@ -251,7 +285,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (!response.ok || !data.ok) {
             if (response.status === 429) {
-                throw new Error('Assistant temporarily busy');
+                throw new Error('ASSISTANT_BUSY');
             }
 
             throw new Error(data.error || 'Assistant request failed');
@@ -291,7 +325,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const error = document.createElement('div');
             error.className = 'fw-assistant-email-error';
-            error.textContent = 'Пожалуйста, укажите корректный email.';
+            error.textContent = aiText.emailError;
             input.insertAdjacentElement('afterend', error);
             input.focus();
             return;
@@ -360,10 +394,10 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (error) {
             hideTyping();
 
-            if (error.message === 'Assistant temporarily busy') {
-                addMessage('assistant', 'Сервис временно занят. Попробуйте отправить сообщение ещё раз через минуту.');
+            if (error.message === 'ASSISTANT_BUSY') {
+                addMessage('assistant', aiText.busy);
             } else {
-                addMessage('assistant', 'Не удалось получить ответ. Попробуйте ещё раз.');
+                addMessage('assistant', aiText.requestError);
             }
 
             console.error(error);

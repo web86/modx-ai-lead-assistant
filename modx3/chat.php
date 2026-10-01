@@ -133,13 +133,6 @@ function assistantBaseLeadEvent(
         'conversation_id' => $conversationId,
         'email' => $email,
         'page_url' => $pageUrl,
-        'ip' => (string)($_SERVER['REMOTE_ADDR'] ?? ''),
-        'user_agent' => mb_substr(
-            (string)($_SERVER['HTTP_USER_AGENT'] ?? ''),
-            0,
-            500,
-            'UTF-8'
-        ),
     ];
 }
 
@@ -611,6 +604,17 @@ $conversation['updated_at'] = time();
 
 if (!isset($conversation['history']) || !is_array($conversation['history'])) {
     $conversation['history'] = [];
+}
+
+if (empty($conversation['contact_logged_at'])) {
+    assistantWriteLeadEvent(
+        $modx,
+        array_merge(
+            assistantBaseLeadEvent($conversationId, $email, $pageUrl),
+            ['event' => 'contact_saved']
+        )
+    );
+    $conversation['contact_logged_at'] = time();
 }
 
 if (empty($conversation['first_request_logged_at'])) {

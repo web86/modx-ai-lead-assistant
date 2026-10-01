@@ -184,41 +184,6 @@ function web86_ai_lead_render_logs(): void
             strcmp((string)($b['updated_at'] ?? ''), (string)($a['updated_at'] ?? ''))
     );
 
-    if (isset($_GET['export']) && $_GET['export'] === 'csv') {
-        nocache_headers();
-        header('Content-Type: text/csv; charset=UTF-8');
-        header('Content-Disposition: attachment; filename="ai-leads-' . gmdate('Y-m-d') . '.csv"');
-
-        $out = fopen('php://output', 'wb');
-        fwrite($out, "\xEF\xBB\xBF");
-        fputcsv($out, [
-            'Created', 'Updated', 'Status', 'Email', 'First request',
-            'Name', 'Website', 'Request', 'Summary', 'Page',
-            'Email sent', 'Telegram sent', 'Conversation ID'
-        ]);
-
-        foreach ($rows as $row) {
-            fputcsv($out, [
-                $row['datetime'] ?? '',
-                $row['updated_at'] ?? '',
-                $row['status'] ?? '',
-                $row['email'] ?? '',
-                $row['first_request'] ?? '',
-                $row['name'] ?? '',
-                $row['website'] ?? '',
-                $row['request'] ?? '',
-                $row['summary'] ?? '',
-                $row['page_url'] ?? '',
-                !empty($row['email_sent']) ? 'yes' : 'no',
-                !empty($row['telegram_sent']) ? 'yes' : 'no',
-                $row['conversation_id'] ?? '',
-            ]);
-        }
-
-        fclose($out);
-        exit;
-    }
-
     $years = [];
     $dir = web86_ai_lead_log_dir($settings);
     foreach (glob($dir . '/*-AILeadLogs.jsonl') ?: [] as $file) {
@@ -349,6 +314,110 @@ function web86_ai_lead_render_logs(): void
     </div>
     <?php
 }
+
+add_action('admin_init', static function (): void {
+    if (
+        !is_admin()
+        || (string)($_GET['page'] ?? '') !== 'web86-ai-lead-logs'
+        || (string)($_GET['export'] ?? '') !== 'csv'
+    ) {
+        return;
+    }
+
+    if (!current_user_can('manage_options')) {
+        wp_die('Access denied.');
+    }
+
+    $settings = web86_ai_lead_settings();
+    $rows = web86_ai_lead_viewer_collect($settings);
+
+    $status = sanitize_text_field((string)($_GET['status'] ?? ''));
+    $contact = sanitize_text_field((string)($_GET['contact'] ?? ''));
+    $request = sanitize_text_field((string)($_GET['request'] ?? ''));
+    $q = sanitize_text_field((string)($_GET['q'] ?? ''));
+
+    $rows = array_values(array_filter(
+        $rows,
+        static function (array $row) use ($status, $contact, $request, $q): bool {
+            if ($status !== '' && ($row['status'] ?? '') !== $status) {
+                return false;
+            }
+
+            if ($contact !== '' && !web86_ai_lead_viewer_contains(
+                implode(' ', [
+                    (string)($row['email'] ?? ''),
+                    (string)($row['name'] ?? ''),
+                    (string)($row['website'] ?? ''),
+                ]),
+                $contact
+            )) {
+                return false;
+            }
+
+            if ($request !== '' && !web86_ai_lead_viewer_contains(
+                implode(' ', [
+                    (string)($row['first_request'] ?? ''),
+                    (string)($row['request'] ?? ''),
+                    (string)($row['summary'] ?? ''),
+                ]),
+                $request
+            )) {
+                return false;
+            }
+
+            if ($q !== '' && !web86_ai_lead_viewer_contains(
+                implode(' ', array_map(
+                    static fn($value): string => is_scalar($value) ? (string)$value : '',
+                    $row
+                )),
+                $q
+            )) {
+                return false;
+            }
+
+            return true;
+        }
+    ));
+
+    usort(
+        $rows,
+        static fn(array $a, array $b): int =>
+            strcmp((string)($b['updated_at'] ?? ''), (string)($a['updated_at'] ?? ''))
+    );
+
+    nocache_headers();
+    header('Content-Type: text/csv; charset=UTF-8');
+    header('Content-Disposition: attachment; filename="ai-leads-' . gmdate('Y-m-d') . '.csv"');
+
+    $out = fopen('php://output', 'wb');
+    fwrite($out, "\xEF\xBB\xBF");
+    fputcsv($out, [
+        'Created', 'Updated', 'Status', 'Email', 'First request',
+        'Name', 'Website', 'Request', 'Summary', 'Page',
+        'Email sent', 'Telegram sent', 'Conversation ID'
+    ]);
+
+    foreach ($rows as $row) {
+        fputcsv($out, [
+            $row['datetime'] ?? '',
+            $row['updated_at'] ?? '',
+            $row['status'] ?? '',
+            $row['email'] ?? '',
+            $row['first_request'] ?? '',
+            $row['name'] ?? '',
+            $row['website'] ?? '',
+            $row['request'] ?? '',
+            $row['summary'] ?? '',
+            $row['page_url'] ?? '',
+            !empty($row['email_sent']) ? 'yes' : 'no',
+            !empty($row['telegram_sent']) ? 'yes' : 'no',
+            $row['conversation_id'] ?? '',
+        ]);
+    }
+
+    fclose($out);
+    exit;
+});
 
 add_action('admin_menu', static function (): void {
     add_management_page(

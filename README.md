@@ -395,3 +395,37 @@ Never commit real API keys, Telegram bot tokens, gateway secrets, visitor data, 
 ## License
 
 MIT.
+
+
+## Lead logging and recovery
+
+All three CMS adapters can keep a small persistent lead journal so a contact is not lost when a visitor leaves before the final handoff.
+
+The lifecycle is stored as append-only JSONL events:
+
+```text
+contact_saved
+first_request
+handoff_success
+handoff_failed
+```
+
+Files are split by month:
+
+```text
+2026-10-AILeadLogs.jsonl
+2026-11-AILeadLogs.jsonl
+```
+
+Each conversation is correlated by `conversation_id`. The viewer combines the events into one lead row with one of these states:
+
+```text
+Contact only
+Conversation started
+Handoff failed
+Sent
+```
+
+Only the data needed to recover the lead is stored: email, source page, first request, and — when handoff is attempted — the same compact lead fields used for Telegram (`name`, `website`, `request`, `summary`) plus delivery-channel results. IP addresses and User-Agent strings are not stored.
+
+The viewers support period/status/contact/request filtering and CSV export.

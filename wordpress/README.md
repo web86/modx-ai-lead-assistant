@@ -172,3 +172,54 @@ Before debugging Cloud Run, Groq, or the assistant prompt, always confirm first 
 ```
 
 returns a normal JSON response and is not being redirected.
+
+
+## Lead logging
+
+Version 1.2 adds persistent lead lifecycle logging.
+
+The plugin records:
+
+- `contact_saved` as soon as the visitor submits a valid email;
+- `first_request` for the first message;
+- `handoff_success` when email and/or Telegram succeeds;
+- `handoff_failed` when a handoff is attempted but both delivery channels fail.
+
+Logs are split into monthly JSONL files:
+
+```text
+2026-10-AILeadLogs.jsonl
+```
+
+Configure logging in:
+
+```text
+Settings → AI Lead Assistant
+```
+
+The default log directory is:
+
+```text
+wp-content/web86-ai-lead-logs
+```
+
+For production, prefer a writable directory outside the public document root. The plugin creates Apache protection files in the default directory, but an Nginx server must be configured separately if that directory remains web-accessible.
+
+The journal deliberately does not store IP addresses or User-Agent strings.
+
+### Lead viewer
+
+Open:
+
+```text
+Tools → AI Lead Log
+```
+
+The viewer aggregates all events by `conversation_id` and shows one row per lead with these statuses:
+
+- Contact only
+- Conversation started
+- Handoff failed
+- Sent
+
+It supports filtering by year, month, status, contact, request text, general search, and CSV export.

@@ -42,7 +42,7 @@ $logPath = rtrim(
     trim((string)$modx->getOption(
         'portfolio_assistant.log_path',
         null,
-        MODX_CORE_PATH . 'logs/ai-lead-assistant'
+        MODX_CORE_PATH . 'cache/logs/ai-lead-assistant'
     )),
     "/\\"
 );

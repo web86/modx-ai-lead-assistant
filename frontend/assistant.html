@@ -9,7 +9,7 @@
         class="fw-assistant-window"
         id="fwAssistantWindow"
         role="dialog"
-        aria-label="Чат с виртуальным помощником"
+        aria-label="Chat with the virtual assistant"
         aria-hidden="true"
     >
         <div class="fw-assistant-header">
@@ -20,11 +20,11 @@
 
                 <div class="fw-assistant-profile-text">
                     <strong>AI Assistant</strong>
-                    <span><i></i> Онлайн</span>
+                    <span><i></i> Online</span>
                 </div>
             </div>
 
-            <button class="fw-assistant-close" type="button" aria-label="Свернуть чат">
+            <button class="fw-assistant-close" type="button" aria-label="Minimize chat">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M6 9l6 6 6-6"/>
                 </svg>
@@ -37,8 +37,8 @@
                     <div class="fw-assistant-mini-avatar"><span></span></div>
 
                     <div class="fw-assistant-message">
-                        <p>Привет! 👋 Я виртуальный помощник.</p>
-                        <p>Могу рассказать об услугах и помочь сформулировать вашу задачу.</p>
+                        <p>Hello! 👋 I'm a virtual assistant.</p>
+                        <p>I can tell you about the services and help you describe what you need.</p>
                     </div>
                 </div>
 
@@ -51,8 +51,8 @@
                     </div>
 
                     <div>
-                        <strong>Начнём?</strong>
-                        <p>Оставьте email, чтобы мы могли связаться с вами после разговора.</p>
+                        <strong>Let's get started?</strong>
+                        <p>Leave your email so we can contact you after the conversation.</p>
                     </div>
 
                     <form class="fw-assistant-email-form" novalidate>
@@ -66,7 +66,7 @@
                         >
 
                         <button type="submit">
-                            Продолжить
+                            Continue
                             <svg viewBox="0 0 24 24" aria-hidden="true">
                                 <path d="M5 12h14"/>
                                 <path d="M14 7l5 5-5 5"/>
@@ -84,14 +84,14 @@
                         id="fwAssistantInput"
                         rows="1"
                         maxlength="2000"
-                        placeholder="Введите сообщение..."
-                        aria-label="Сообщение"
+                        placeholder="Type a message..."
+                        aria-label="Message"
                     ></textarea>
 
                     <button
                         class="fw-assistant-send"
                         type="submit"
-                        aria-label="Отправить сообщение"
+                        aria-label="Send message"
                         disabled
                     >
                         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -113,7 +113,7 @@
         class="fw-assistant-trigger"
         id="fwAssistantTrigger"
         type="button"
-        aria-label="Открыть чат"
+        aria-label="Open chat"
         aria-expanded="false"
     >
         <span class="fw-assistant-pulse"></span>
@@ -129,7 +129,7 @@
         <span class="fw-assistant-notification">1</span>
     </button>
 
-    <div class="fw-assistant-hint">Спросить помощника</div>
+    <div class="fw-assistant-hint">Ask the assistant</div>
 </div>
 
 <script src="/assets/components/assistant/js/assistant.js" defer></script>

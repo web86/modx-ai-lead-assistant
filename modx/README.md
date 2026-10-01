@@ -85,7 +85,7 @@ Configure MODX mail / SMTP System Settings before testing.
 Lead logging is enabled by default. The default directory is:
 
 ```text
-MODX_CORE_PATH/logs/ai-lead-assistant
+MODX_CORE_PATH/cache/logs/ai-lead-assistant
 ```
 
 Optional System Settings:
@@ -93,7 +93,7 @@ Optional System Settings:
 | Setting | Default |
 | --- | --- |
 | `portfolio_assistant.log_enabled` | `1` |
-| `portfolio_assistant.log_path` | `{core_path}logs/ai-lead-assistant` |
+| `portfolio_assistant.log_path` | `{core_path}cache/logs/ai-lead-assistant` |
 
 Logs are stored as monthly JSONL files such as:
 

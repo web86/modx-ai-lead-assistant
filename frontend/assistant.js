@@ -190,6 +190,33 @@ document.addEventListener('DOMContentLoaded', () => {
         sendButton.disabled = !chatInput.value.trim() || isReplying || chatInput.disabled;
     }
 
+    async function saveContact(email) {
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json'
+            },
+            body: JSON.stringify({
+                action: 'contact',
+                email,
+                page_url: window.location.href,
+                conversation_id: getConversationId()
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error('Could not save assistant contact');
+        }
+
+        const data = await response.json();
+
+        if (!data.ok) {
+            throw new Error(data.error || 'Could not save assistant contact');
+        }
+    }
+
     async function getAssistantReply(message) {
         const email = sessionStorage.getItem('fwAssistantEmail');
 
@@ -205,6 +232,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 Accept: 'application/json'
             },
             body: JSON.stringify({
+                action: 'message',
                 email,
                 message,
                 page_url: window.location.href,
@@ -248,7 +276,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    emailForm.addEventListener('submit', event => {
+    emailForm.addEventListener('submit', async event => {
         event.preventDefault();
 
         const input = emailForm.querySelector('input[type="email"]');
@@ -277,6 +305,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 createConversationId()
             );
         }
+
+        try {
+            await saveContact(email);
+        } catch (error) {
+            console.error(error);
+        }
+
         emailCard.classList.add('is-leaving');
 
         setTimeout(() => startChat(false), 250);

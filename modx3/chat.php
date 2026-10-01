@@ -58,6 +58,91 @@ function assistantLog($modx, string $message): void
     }
 }
 
+function assistantLeadLogPath($modx): string
+{
+    return rtrim(
+        trim((string)$modx->getOption(
+            'portfolio_assistant.log_path',
+            null,
+            MODX_CORE_PATH . 'logs/ai-lead-assistant'
+        )),
+        "/\\"
+    );
+}
+
+function assistantWriteLeadEvent($modx, array $event): bool
+{
+    if (!assistantBool(
+        $modx->getOption('portfolio_assistant.log_enabled', null, true)
+    )) {
+        return false;
+    }
+
+    $dir = assistantLeadLogPath($modx);
+
+    if ($dir === '') {
+        return false;
+    }
+
+    if (!is_dir($dir) && !@mkdir($dir, 0750, true) && !is_dir($dir)) {
+        assistantLog($modx, 'Could not create lead log directory: ' . $dir);
+        return false;
+    }
+
+    if (!is_writable($dir)) {
+        assistantLog($modx, 'Lead log directory is not writable: ' . $dir);
+        return false;
+    }
+
+    $event = array_merge(
+        [
+            'datetime' => gmdate('c'),
+            'event' => '',
+            'cms' => 'modx3',
+        ],
+        $event
+    );
+
+    try {
+        $line = json_encode(
+            $event,
+            JSON_UNESCAPED_UNICODE
+            | JSON_UNESCAPED_SLASHES
+            | JSON_THROW_ON_ERROR
+        );
+    } catch (JsonException $e) {
+        assistantLog($modx, 'Could not encode lead log event: ' . $e->getMessage());
+        return false;
+    }
+
+    $file = $dir . '/' . gmdate('Y-m') . '-AILeadLogs.jsonl';
+
+    return file_put_contents(
+        $file,
+        $line . "\n",
+        FILE_APPEND | LOCK_EX
+    ) !== false;
+}
+
+function assistantBaseLeadEvent(
+    string $conversationId,
+    string $email,
+    string $pageUrl
+): array {
+    return [
+        'conversation_id' => $conversationId,
+        'email' => $email,
+        'page_url' => $pageUrl,
+        'ip' => (string)($_SERVER['REMOTE_ADDR'] ?? ''),
+        'user_agent' => mb_substr(
+            (string)($_SERVER['HTTP_USER_AGENT'] ?? ''),
+            0,
+            500,
+            'UTF-8'
+        ),
+    ];
+}
+
 function assistantBool($value): bool
 {
     if (is_bool($value)) {
@@ -375,7 +460,6 @@ $telegramGatewayUrl = trim((string)$modx->getOption(
 
 $maxMessages = max(4, min($maxMessages, 50));
 $aiRules = assistantLoadAiRules($modx);
-$aiRules = assistantLoadAiRules($modx);
 
 if ($ownerName === '') {
     $ownerName = 'the site owner';
@@ -436,9 +520,11 @@ if (!is_array($data)) {
     assistantRespond(['ok' => false, 'error' => 'Invalid request'], 400);
 }
 
+$action = trim((string)($data['action'] ?? 'message'));
 $email = trim((string)($data['email'] ?? ''));
 $message = trim((string)($data['message'] ?? ''));
-$pageUrl = trim((string)($data['page_url'] ?? ''));
+$pageUrl = mb_substr(trim((string)($data['page_url'] ?? '')), 0, 1000, 'UTF-8');
+$conversationId = trim((string)($data['conversation_id'] ?? ''));
 
 if (
     $email === '' ||
@@ -448,12 +534,58 @@ if (
     assistantRespond(['ok' => false, 'error' => 'Invalid email'], 422);
 }
 
+if (
+    $conversationId === '' ||
+    strlen($conversationId) > 80 ||
+    !preg_match('/^[A-Za-z0-9_-]{16,80}$/', $conversationId)
+) {
+    assistantRespond(['ok' => false, 'error' => 'Invalid conversation ID'], 422);
+}
+
+$conversationKey = 'portfolio_assistant_conversation';
+if (!isset($_SESSION[$conversationKey]) || !is_array($_SESSION[$conversationKey])) {
+    $_SESSION[$conversationKey] = [];
+}
+
+$conversation = &$_SESSION[$conversationKey];
+
+if (!isset($conversation['email']) || $conversation['email'] !== $email) {
+    $conversation = [
+        'email' => $email,
+        'page_url' => $pageUrl,
+        'conversation_id' => $conversationId,
+        'started_at' => time(),
+        'updated_at' => time(),
+        'history' => [],
+    ];
+}
+
+if ($action === 'contact') {
+    if (empty($conversation['contact_logged_at'])) {
+        assistantWriteLeadEvent(
+            $modx,
+            array_merge(
+                assistantBaseLeadEvent($conversationId, $email, $pageUrl),
+                ['event' => 'contact_saved']
+            )
+        );
+        $conversation['contact_logged_at'] = time();
+    }
+
+    $conversation['page_url'] = $pageUrl;
+    $conversation['updated_at'] = time();
+
+    assistantRespond(['ok' => true]);
+}
+
+if ($action !== 'message') {
+    assistantRespond(['ok' => false, 'error' => 'Invalid action'], 422);
+}
+
 $messageLength = mb_strlen($message, 'UTF-8');
 if ($message === '' || $messageLength > 2000) {
     assistantRespond(['ok' => false, 'error' => 'Invalid message'], 422);
 }
-
-$pageUrl = mb_substr($pageUrl, 0, 1000, 'UTF-8');
 
 $rateKey = 'portfolio_assistant_rate';
 if (!isset($_SESSION[$rateKey]) || !is_array($_SESSION[$rateKey])) {
@@ -474,28 +606,25 @@ if (count($_SESSION[$rateKey]) >= 12) {
 
 $_SESSION[$rateKey][] = $now;
 
-$conversationKey = 'portfolio_assistant_conversation';
-if (!isset($_SESSION[$conversationKey]) || !is_array($_SESSION[$conversationKey])) {
-    $_SESSION[$conversationKey] = [];
-}
-
-$conversation = &$_SESSION[$conversationKey];
-
-if (!isset($conversation['email']) || $conversation['email'] !== $email) {
-    $conversation = [
-        'email' => $email,
-        'page_url' => $pageUrl,
-        'started_at' => time(),
-        'updated_at' => time(),
-        'history' => [],
-    ];
-}
-
 $conversation['page_url'] = $pageUrl;
 $conversation['updated_at'] = time();
 
 if (!isset($conversation['history']) || !is_array($conversation['history'])) {
     $conversation['history'] = [];
+}
+
+if (empty($conversation['first_request_logged_at'])) {
+    assistantWriteLeadEvent(
+        $modx,
+        array_merge(
+            assistantBaseLeadEvent($conversationId, $email, $pageUrl),
+            [
+                'event' => 'first_request',
+                'first_request' => $message,
+            ]
+        )
+    );
+    $conversation['first_request_logged_at'] = time();
 }
 
 // Build temporary request history. Commit it only after a successful turn.
@@ -738,6 +867,22 @@ if ($readyToHandoff && empty($conversation['handoff_sent_at'])) {
     }
 
     $handoffSent = $emailSent || $telegramSent;
+
+    assistantWriteLeadEvent(
+        $modx,
+        array_merge(
+            assistantBaseLeadEvent($conversationId, $email, $pageUrl),
+            [
+                'event' => $handoffSent ? 'handoff_success' : 'handoff_failed',
+                'name' => trim((string)($lead['name'] ?? '')),
+                'website' => trim((string)($lead['website'] ?? '')),
+                'request' => trim((string)($lead['request'] ?? '')),
+                'summary' => trim((string)($lead['summary'] ?? '')),
+                'email_sent' => $emailSent,
+                'telegram_sent' => $telegramSent,
+            ]
+        )
+    );
 
     if ($handoffSent) {
         $conversation['handoff_sent_at'] = time();

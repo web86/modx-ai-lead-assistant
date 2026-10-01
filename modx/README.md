@@ -77,3 +77,54 @@ $mail = $modx->getService('mail', 'mail.modPHPMailer');
 ```
 
 Configure MODX mail / SMTP System Settings before testing.
+
+
+## Lead logging
+
+Lead logging is enabled by default. The default directory is:
+
+```text
+MODX_CORE_PATH/logs/ai-lead-assistant
+```
+
+Optional System Settings:
+
+| Setting | Default |
+| --- | --- |
+| `portfolio_assistant.log_enabled` | `1` |
+| `portfolio_assistant.log_path` | `{core_path}logs/ai-lead-assistant` |
+
+Logs are stored as monthly JSONL files such as:
+
+```text
+2026-10-AILeadLogs.jsonl
+```
+
+Events:
+
+- `contact_saved` — email was entered;
+- `first_request` — the first visitor request was received;
+- `handoff_success` — email and/or Telegram delivery succeeded;
+- `handoff_failed` — a handoff was attempted but neither channel succeeded.
+
+### Lead viewer
+
+Copy:
+
+```text
+modx/admin/index.php
+```
+
+to:
+
+```text
+/assets/components/assistant/admin/index.php
+```
+
+Then open:
+
+```text
+/assets/components/assistant/admin/
+```
+
+The viewer requires an active MODX Manager session and a sudo user. It provides filters and CSV export.

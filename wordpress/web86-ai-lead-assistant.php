@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Web86 AI Lead Assistant
  * Description: WordPress adapter for the Web86 AI Lead Assistant Cloud Run gateway.
- * Version: 1.1.0
+ * Version: 1.2.0
  * Author: web86
  * License: MIT
  */
@@ -68,6 +68,8 @@ function web86_ai_lead_defaults(): array
         'gateway_secret' => '',
         'telegram_enabled' => 0,
         'telegram_gateway_url' => '',
+        'log_enabled' => 1,
+        'log_path' => WP_CONTENT_DIR . '/web86-ai-lead-logs',
     ];
 }
 
@@ -119,6 +121,102 @@ function web86_ai_lead_sanitize_settings($input): array
         'gateway_secret' => $secret,
         'telegram_enabled' => empty($input['telegram_enabled']) ? 0 : 1,
         'telegram_gateway_url' => esc_url_raw((string)($input['telegram_gateway_url'] ?? '')),
+        'log_enabled' => empty($input['log_enabled']) ? 0 : 1,
+        'log_path' => sanitize_text_field((string)($input['log_path'] ?? '')),
+    ];
+}
+
+function web86_ai_lead_log_dir(array $settings): string
+{
+    return rtrim((string)($settings['log_path'] ?? ''), "/\\");
+}
+
+function web86_ai_lead_ensure_log_dir(array $settings): ?string
+{
+    if (empty($settings['log_enabled'])) {
+        return null;
+    }
+
+    $dir = web86_ai_lead_log_dir($settings);
+
+    if ($dir === '') {
+        return null;
+    }
+
+    if (!is_dir($dir) && !wp_mkdir_p($dir)) {
+        web86_ai_lead_log('Could not create lead log directory: ' . $dir);
+        return null;
+    }
+
+    if (!is_writable($dir)) {
+        web86_ai_lead_log('Lead log directory is not writable: ' . $dir);
+        return null;
+    }
+
+    $htaccess = $dir . '/.htaccess';
+    if (!is_file($htaccess)) {
+        @file_put_contents($htaccess, "Require all denied\nDeny from all\n");
+    }
+
+    $index = $dir . '/index.php';
+    if (!is_file($index)) {
+        @file_put_contents($index, "<?php http_response_code(403); exit;\n");
+    }
+
+    return $dir;
+}
+
+function web86_ai_lead_write_event(array $settings, array $event): bool
+{
+    $dir = web86_ai_lead_ensure_log_dir($settings);
+
+    if ($dir === null) {
+        return false;
+    }
+
+    $event = array_merge(
+        [
+            'datetime' => gmdate('c'),
+            'event' => '',
+            'cms' => 'wordpress',
+        ],
+        $event
+    );
+
+    $file = $dir . '/' . gmdate('Y-m') . '-AILeadLogs.jsonl';
+
+    $line = wp_json_encode(
+        $event,
+        JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+    );
+
+    if (!is_string($line)) {
+        return false;
+    }
+
+    return file_put_contents(
+        $file,
+        $line . "\n",
+        FILE_APPEND | LOCK_EX
+    ) !== false;
+}
+
+function web86_ai_lead_base_log_event(
+    string $conversationId,
+    string $email,
+    string $pageUrl
+): array {
+    return [
+        'conversation_id' => $conversationId,
+        'email' => $email,
+        'page_url' => $pageUrl,
+        'ip' => (string)($_SERVER['REMOTE_ADDR'] ?? ''),
+        'user_agent' => mb_substr(
+            (string)($_SERVER['HTTP_USER_AGENT'] ?? ''),
+            0,
+            500,
+            'UTF-8'
+        ),
     ];
 }
 
@@ -306,6 +404,37 @@ function web86_ai_lead_render_settings(): void
                             >
                             Send lead notifications through Cloud Run
                         </label>
+                    </td>
+                </tr>
+
+                <tr>
+                    <th scope="row">Lead logging</th>
+                    <td>
+                        <label>
+                            <input
+                                type="checkbox"
+                                name="<?php echo esc_attr(WEB86_AI_LEAD_OPTION); ?>[log_enabled]"
+                                value="1"
+                                <?php checked(!empty($settings['log_enabled'])); ?>
+                            >
+                            Save contacts and lead lifecycle events to monthly JSONL files
+                        </label>
+                    </td>
+                </tr>
+
+                <tr>
+                    <th scope="row"><label for="web86-ai-log-path">Lead log path</label></th>
+                    <td>
+                        <input
+                            class="large-text"
+                            id="web86-ai-log-path"
+                            type="text"
+                            name="<?php echo esc_attr(WEB86_AI_LEAD_OPTION); ?>[log_path]"
+                            value="<?php echo esc_attr((string)$settings['log_path']); ?>"
+                        >
+                        <p class="description">
+                            Prefer a directory outside the public document root when possible.
+                        </p>
                     </td>
                 </tr>
 
@@ -620,7 +749,81 @@ add_action('rest_api_init', static function (): void {
             'permission_callback' => '__return_true',
         ]
     );
+
+    register_rest_route(
+        WEB86_AI_LEAD_REST_NAMESPACE,
+        '/contact',
+        [
+            'methods' => WP_REST_Server::CREATABLE,
+            'callback' => 'web86_ai_lead_rest_contact',
+            'permission_callback' => '__return_true',
+        ]
+    );
 });
+
+function web86_ai_lead_rest_contact(WP_REST_Request $request): WP_REST_Response
+{
+    $settings = web86_ai_lead_settings();
+
+    if (empty($settings['enabled'])) {
+        return web86_ai_lead_error('Assistant is disabled', 503);
+    }
+
+    if (!web86_ai_lead_same_origin()) {
+        return web86_ai_lead_error('Forbidden origin', 403);
+    }
+
+    $params = $request->get_json_params();
+
+    if (!is_array($params)) {
+        return web86_ai_lead_error('Invalid JSON', 400);
+    }
+
+    $email = sanitize_email((string)($params['email'] ?? ''));
+    $pageUrl = esc_url_raw((string)($params['page_url'] ?? ''));
+    $conversationId = trim((string)($params['conversation_id'] ?? ''));
+
+    if ($email === '' || strlen($email) > 254 || !is_email($email)) {
+        return web86_ai_lead_error('Invalid email', 422);
+    }
+
+    if (
+        $conversationId === '' ||
+        strlen($conversationId) > 80 ||
+        !preg_match('/^[A-Za-z0-9_-]{16,80}$/', $conversationId)
+    ) {
+        return web86_ai_lead_error('Invalid conversation ID', 422);
+    }
+
+    $key = web86_ai_lead_conversation_key($conversationId);
+    $conversation = get_transient($key);
+
+    if (!is_array($conversation) || (($conversation['email'] ?? '') !== $email)) {
+        $conversation = [
+            'email' => $email,
+            'page_url' => $pageUrl,
+            'started_at' => time(),
+            'updated_at' => time(),
+            'history' => [],
+        ];
+    }
+
+    if (empty($conversation['contact_logged_at'])) {
+        web86_ai_lead_write_event(
+            $settings,
+            array_merge(
+                web86_ai_lead_base_log_event($conversationId, $email, $pageUrl),
+                ['event' => 'contact_saved']
+            )
+        );
+        $conversation['contact_logged_at'] = time();
+    }
+
+    $conversation['updated_at'] = time();
+    set_transient($key, $conversation, WEB86_AI_LEAD_CONVERSATION_TTL);
+
+    return new WP_REST_Response(['ok' => true], 200);
+}
 
 function web86_ai_lead_rest_chat(WP_REST_Request $request): WP_REST_Response
 {
@@ -719,6 +922,20 @@ function web86_ai_lead_rest_chat(WP_REST_Request $request): WP_REST_Response
 
     if (!isset($conversation['history']) || !is_array($conversation['history'])) {
         $conversation['history'] = [];
+    }
+
+    if (empty($conversation['first_request_logged_at'])) {
+        web86_ai_lead_write_event(
+            $settings,
+            array_merge(
+                web86_ai_lead_base_log_event($conversationId, $email, $pageUrl),
+                [
+                    'event' => 'first_request',
+                    'first_request' => mb_substr($message, 0, 2000, 'UTF-8'),
+                ]
+            )
+        );
+        $conversation['first_request_logged_at'] = time();
     }
 
     // Build a temporary turn. Persist only after a successful AI response.
@@ -940,6 +1157,22 @@ PROMPT;
         }
 
         $handoffSent = $emailSent || $telegramSent;
+
+        web86_ai_lead_write_event(
+            $settings,
+            array_merge(
+                web86_ai_lead_base_log_event($conversationId, $email, $pageUrl),
+                [
+                    'event' => $handoffSent ? 'handoff_success' : 'handoff_failed',
+                    'name' => trim((string)($lead['name'] ?? '')),
+                    'website' => trim((string)($lead['website'] ?? '')),
+                    'request' => trim((string)($lead['request'] ?? '')),
+                    'summary' => trim((string)($lead['summary'] ?? '')),
+                    'email_sent' => $emailSent,
+                    'telegram_sent' => $telegramSent,
+                ]
+            )
+        );
 
         if ($handoffSent) {
             if ($handoffMessage !== '') {

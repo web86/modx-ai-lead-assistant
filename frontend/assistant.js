@@ -6,6 +6,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const endpoint = assistant.dataset.endpoint || '/assets/components/assistant/api/chat.php';
+    const contactEndpoint = assistant.dataset.contactEndpoint || (endpoint.match(/\/chat\/?$/) ? endpoint.replace(/\/chat\/?$/, '/contact') : endpoint);
     const trigger = document.getElementById('fwAssistantTrigger');
     const windowElement = document.getElementById('fwAssistantWindow');
     const closeButton = assistant.querySelector('.fw-assistant-close');
@@ -191,7 +192,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function saveContact(email) {
-        const response = await fetch(endpoint, {
+        const response = await fetch(contactEndpoint, {
             method: 'POST',
             credentials: 'same-origin',
             headers: {

@@ -210,13 +210,6 @@ function web86_ai_lead_base_log_event(
         'conversation_id' => $conversationId,
         'email' => $email,
         'page_url' => $pageUrl,
-        'ip' => (string)($_SERVER['REMOTE_ADDR'] ?? ''),
-        'user_agent' => mb_substr(
-            (string)($_SERVER['HTTP_USER_AGENT'] ?? ''),
-            0,
-            500,
-            'UTF-8'
-        ),
     ];
 }
 
@@ -922,6 +915,17 @@ function web86_ai_lead_rest_chat(WP_REST_Request $request): WP_REST_Response
 
     if (!isset($conversation['history']) || !is_array($conversation['history'])) {
         $conversation['history'] = [];
+    }
+
+    if (empty($conversation['contact_logged_at'])) {
+        web86_ai_lead_write_event(
+            $settings,
+            array_merge(
+                web86_ai_lead_base_log_event($conversationId, $email, $pageUrl),
+                ['event' => 'contact_saved']
+            )
+        );
+        $conversation['contact_logged_at'] = time();
     }
 
     if (empty($conversation['first_request_logged_at'])) {

@@ -15,7 +15,9 @@ function web86_ai_lead_viewer_collect(array $settings): array
     $files = glob($dir . '/*-AILeadLogs.jsonl') ?: [];
     sort($files);
 
-    $year = isset($_GET['year']) ? preg_replace('/[^0-9]/', '', (string)$_GET['year']) : '';
+    $year = array_key_exists('year', $_GET)
+        ? preg_replace('/[^0-9]/', '', (string)$_GET['year'])
+        : wp_date('Y');
     $month = isset($_GET['month']) ? preg_replace('/[^0-9]/', '', (string)$_GET['month']) : '';
 
     $leads = [];
@@ -134,6 +136,9 @@ function web86_ai_lead_render_logs(): void
     $contact = sanitize_text_field((string)($_GET['contact'] ?? ''));
     $request = sanitize_text_field((string)($_GET['request'] ?? ''));
     $q = sanitize_text_field((string)($_GET['q'] ?? ''));
+    $selectedYear = array_key_exists('year', $_GET)
+        ? preg_replace('/[^0-9]/', '', (string)$_GET['year'])
+        : wp_date('Y');
 
     $rows = array_values(array_filter(
         $rows,
@@ -211,7 +216,7 @@ function web86_ai_lead_render_logs(): void
                 <select name="year">
                     <option value="">All</option>
                     <?php foreach ($years as $y => $months): ?>
-                        <option value="<?php echo esc_attr($y); ?>" <?php selected((string)($_GET['year'] ?? ''), $y); ?>>
+                        <option value="<?php echo esc_attr($y); ?>" <?php selected($selectedYear, $y); ?>>
                             <?php echo esc_html($y); ?>
                         </option>
                     <?php endforeach; ?>

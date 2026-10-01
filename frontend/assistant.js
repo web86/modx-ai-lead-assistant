@@ -17,6 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const chatForm = document.getElementById('fwAssistantChatForm');
     const chatInput = document.getElementById('fwAssistantInput');
     const sendButton = assistant.querySelector('.fw-assistant-send');
+    const hint = assistant.querySelector('.fw-assistant-hint');
 
     const aiText = {
         welcomeBack:
@@ -97,6 +98,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function openAssistant() {
         assistant.classList.add('is-open');
+
+        if (hint) {
+            hint.style.opacity = '';
+            hint.style.visibility = '';
+            hint.style.transform = '';
+        }
         trigger.setAttribute('aria-expanded', 'true');
         trigger.setAttribute('aria-label', aiText.closeChat);
         windowElement.setAttribute('aria-hidden', 'false');
@@ -421,10 +428,25 @@ document.addEventListener('DOMContentLoaded', () => {
         sessionStorage.removeItem('fwAssistantConversationId');
     }
 
-    if (!localStorage.getItem('fwAssistantOpened')) {
-        setTimeout(() => {
+    /*
+     * -------------------------------------------------------
+     * First visit attention animation
+     * -------------------------------------------------------
+     */
+
+    setTimeout(() => {
+        if (!assistant.classList.contains('is-open')) {
             trigger.classList.add('fw-assistant-attention');
-            setTimeout(() => trigger.classList.remove('fw-assistant-attention'), 1500);
-        }, 4000);
-    }
+
+            if (hint) {
+                hint.style.opacity = '1';
+                hint.style.visibility = 'visible';
+                hint.style.transform = 'translateX(0)';
+            }
+
+            setTimeout(() => {
+                trigger.classList.remove('fw-assistant-attention');
+            }, 1500);
+        }
+    }, 4000);
 });

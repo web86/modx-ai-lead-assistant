@@ -53,6 +53,7 @@ Create these MODX System Settings:
 | `portfolio_assistant.gateway_secret` | long random secret |
 | `portfolio_assistant.telegram_enabled` | `1` |
 | `portfolio_assistant.telegram_gateway_url` | `https://YOUR-SERVICE.run.app/telegram` |
+| `portfolio_assistant.ai_rules` | `portfolio_assistant.ai_rules` (Chunk name) |
 
 The gateway secret is server-side only. Never render it into a Chunk, template, JavaScript, or page source.
 

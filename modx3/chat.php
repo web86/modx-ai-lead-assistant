@@ -152,7 +152,16 @@ function assistantBool($value): bool
 
 function assistantLoadAiRules($modx): string
 {
-    $chunkName = 'portfolio_assistant.ai_rules';
+    $chunkName = trim((string)$modx->getOption(
+        'portfolio_assistant.ai_rules',
+        null,
+        'portfolio_assistant.ai_rules'
+    ));
+
+    if ($chunkName === '') {
+        $chunkName = 'portfolio_assistant.ai_rules';
+    }
+
     $chunk = $modx->getObject(modChunk::class, ['name' => $chunkName]);
 
     if (!$chunk) {
@@ -173,27 +182,6 @@ function assistantLoadAiRules($modx): string
     }
 
     return $rules;
-}
-
-
-function assistantLoadAiRules($modx): string
-{
-    $chunkName = 'portfolio_assistant.ai_rules';
-    $chunk = $modx->getObject(modChunk::class, ['name' => $chunkName]);
-
-    if (!$chunk) {
-        assistantLog($modx, 'Missing Chunk: ' . $chunkName . '. Using minimal fallback rules.');
-        return 'Be helpful, concise, and ask only for information needed to understand the visitor request. Never invent prices, deadlines, projects, clients, or guarantees.';
-    }
-
-    $rules = trim((string)$chunk->get('snippet'));
-
-    if ($rules === '') {
-        assistantLog($modx, 'Chunk ' . $chunkName . ' is empty. Using minimal fallback rules.');
-        return 'Be helpful, concise, and ask only for information needed to understand the visitor request. Never invent prices, deadlines, projects, clients, or guarantees.';
-    }
-
-    return mb_substr($rules, 0, 12000, 'UTF-8');
 }
 
 function assistantTrimHistory(array $history, int $limit): array

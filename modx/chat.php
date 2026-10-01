@@ -45,7 +45,7 @@ function assistantLeadLogPath($modx): string
         trim((string)$modx->getOption(
             'portfolio_assistant.log_path',
             null,
-            MODX_CORE_PATH . 'logs/ai-lead-assistant'
+            MODX_CORE_PATH . 'cache/logs/ai-lead-assistant'
         )),
         "/\\"
     );
@@ -98,11 +98,18 @@ function assistantWriteLeadEvent($modx, array $event): bool
 
     $file = $dir . '/' . gmdate('Y-m') . '-AILeadLogs.jsonl';
 
-    return file_put_contents(
+    $written = file_put_contents(
         $file,
         $line . "\n",
         FILE_APPEND | LOCK_EX
-    ) !== false;
+    );
+
+    if ($written === false) {
+        assistantLog($modx, 'Could not write lead log file: ' . $file);
+        return false;
+    }
+
+    return true;
 }
 
 function assistantBaseLeadEvent(
@@ -515,14 +522,17 @@ if (!isset($conversation['email']) || $conversation['email'] !== $email) {
 
 if ($action === 'contact') {
     if (empty($conversation['contact_logged_at'])) {
-        assistantWriteLeadEvent(
+        $contactLogged = assistantWriteLeadEvent(
             $modx,
             array_merge(
                 assistantBaseLeadEvent($conversationId, $email, $pageUrl),
                 ['event' => 'contact_saved']
             )
         );
-        $conversation['contact_logged_at'] = time();
+
+        if ($contactLogged) {
+            $conversation['contact_logged_at'] = time();
+        }
     }
 
     $conversation['page_url'] = $pageUrl;
@@ -567,18 +577,21 @@ if (!isset($conversation['history']) || !is_array($conversation['history'])) {
 }
 
 if (empty($conversation['contact_logged_at'])) {
-    assistantWriteLeadEvent(
+    $contactLogged = assistantWriteLeadEvent(
         $modx,
         array_merge(
             assistantBaseLeadEvent($conversationId, $email, $pageUrl),
             ['event' => 'contact_saved']
         )
     );
-    $conversation['contact_logged_at'] = time();
+
+    if ($contactLogged) {
+        $conversation['contact_logged_at'] = time();
+    }
 }
 
 if (empty($conversation['first_request_logged_at'])) {
-    assistantWriteLeadEvent(
+    $firstRequestLogged = assistantWriteLeadEvent(
         $modx,
         array_merge(
             assistantBaseLeadEvent($conversationId, $email, $pageUrl),
@@ -588,7 +601,10 @@ if (empty($conversation['first_request_logged_at'])) {
             ]
         )
     );
-    $conversation['first_request_logged_at'] = time();
+
+    if ($firstRequestLogged) {
+        $conversation['first_request_logged_at'] = time();
+    }
 }
 
 // Build temporary request history. Commit it only after a successful turn.

@@ -51,7 +51,9 @@ if ($logPath === '' || !is_dir($logPath)) {
     exit('<h2>AI Lead Log</h2><p>No lead log directory found yet.</p>');
 }
 
-$year = preg_replace('/[^0-9]/', '', param('year'));
+$year = array_key_exists('year', $_GET)
+    ? preg_replace('/[^0-9]/', '', param('year'))
+    : gmdate('Y');
 $month = preg_replace('/[^0-9]/', '', param('month'));
 $statusFilter = param('status');
 $contactFilter = param('contact');

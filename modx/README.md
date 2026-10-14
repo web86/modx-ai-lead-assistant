@@ -129,3 +129,63 @@ Then open:
 ```
 
 The viewer requires an active MODX Manager session and a sudo user. It provides filters and CSV export.
+
+## Conversation lifecycle and recovery
+
+MODX 2 identifies a conversation by both `conversation_id` and email inside the
+existing PHP session. It retains independent conversations until that session
+expires, so an old tab or a retried delivered request cannot inherit another
+conversation or send its notifications again. The previous single conversation
+is migrated lazily, preserving its history and delivery flags. The PHP session
+lock remains held through handoff; the existing session handler and cookie
+settings are unchanged.
+
+With logging enabled, a failed `contact_saved` write returns HTTP 503 and
+`ok: false`. Message requests also require a saved contact and first-request
+journal entry before calling AI. The widget keeps the email field populated,
+displays a generic error, and allows Continue to retry with the same ID. It stores
+the confirmed `fwAssistantEmail` only after a successful contact response.
+`portfolio_assistant.log_enabled=0` intentionally permits operation without the
+journal.
+
+On refresh, active contacts are rechecked idempotently before the chat resumes.
+The widget preserves its ID and up to 50 visible messages in `sessionStorage`.
+After confirmed delivery, it keeps the composer disabled across refreshes and
+offers **Start a new conversation**. This clears only that tab's assistant state,
+prefills the previous email, and assigns a fresh ID when Continue is pressed.
+The successful handoff flag now stores its conversation ID; old `1` flags are
+migrated without sending any requests automatically.
+
+If both notification channels fail, the server returns an explicit failure
+message and leaves handoff retryable. If either succeeds, delivery is marked
+before diagnostic JSONL logging. Replays return the original delivery channels
+without sending notifications or calling AI. This protection lasts for the PHP
+session; the journal is not a durable delivery deduplication database.
+
+Optional frontend translations (on `#fwAssistant`):
+
+- `data-text-contact-error`: contact failure and Continue retry instruction.
+- `data-text-new-chat`: the completed-chat action label.
+
+### Updating an existing MODX 2 installation
+
+1. Back up the installed assistant files. Leave the existing log directory,
+   monthly JSONL files, PHP session storage, settings, and Lead Viewer intact.
+2. Replace `/assets/components/assistant/api/chat.php` with `modx/chat.php`.
+3. Replace the site's shared assistant JavaScript and CSS with
+   `frontend/assistant.js` and `frontend/assistant.css`. Keep the existing HTML
+   and translations; no markup change is required.
+4. Refresh the static asset version/cache so visitors receive the matching JS
+   and CSS. Do not clear PHP sessions or delete lead logs.
+5. In a test session, complete two conversations with the same email using
+   **Start a new conversation**. Confirm separate IDs/events in Lead Viewer and
+   delivery via your configured channels. Also verify contact retry when the
+   test log directory is temporarily unavailable.
+
+No Cloud Run, database, JSONL schema, or Lead Viewer migration is needed. Install
+the PHP fix before enabling the new shared frontend action on MODX 2. Rolling
+back to the old PHP loses access to the new per-conversation session map and can
+reintroduce duplicate delivery; keep the fixed adapter once visitors use it.
+
+See [regression coverage and verification limits](../tests/README.md) and the
+[fix report](../docs/modx2-conversation-lifecycle.md).

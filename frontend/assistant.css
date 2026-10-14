@@ -641,3 +641,15 @@
         transition-duration: .01ms !important;
     }
 }
+
+/* Allow another inquiry after confirmed delivery. */
+.fw-assistant-new-chat {
+    margin-top: 8px;
+    padding: 8px 12px;
+    border: 1px solid currentColor;
+    border-radius: 10px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}

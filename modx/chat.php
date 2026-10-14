@@ -13,12 +13,16 @@ header('Pragma: no-cache');
 
 if (session_status() !== PHP_SESSION_ACTIVE) {
     session_name('portfolio_assistant');
-    session_start([
+    $sessionStarted = @session_start([
         'cookie_httponly' => true,
         'cookie_secure' => !empty($_SERVER['HTTPS']),
         'cookie_samesite' => 'Lax',
         'use_strict_mode' => true,
     ]);
+    if (!$sessionStarted) {
+        assistantLog($modx, 'Could not start assistant PHP session.');
+        assistantRespond(['ok' => false, 'error' => 'Could not start your conversation. Please try again.'], 503);
+    }
 }
 
 function assistantRespond(array $data, int $status = 200): void
@@ -56,22 +60,25 @@ function assistantWriteLeadEvent($modx, array $event): bool
     if (!assistantBool(
         $modx->getOption('portfolio_assistant.log_enabled', null, true)
     )) {
-        return false;
+        // Logging is intentionally disabled, so no persistence is required.
+        return true;
     }
 
+    $context = ' [conversation_id=' . ($event['conversation_id'] ?? 'unknown') . ']';
     $dir = assistantLeadLogPath($modx);
 
     if ($dir === '') {
+        assistantLog($modx, 'Lead log directory is empty.' . $context);
         return false;
     }
 
     if (!is_dir($dir) && !@mkdir($dir, 0750, true) && !is_dir($dir)) {
-        assistantLog($modx, 'Could not create lead log directory: ' . $dir);
+        assistantLog($modx, 'Could not create lead log directory.' . $context);
         return false;
     }
 
     if (!is_writable($dir)) {
-        assistantLog($modx, 'Lead log directory is not writable: ' . $dir);
+        assistantLog($modx, 'Lead log directory is not writable.' . $context);
         return false;
     }
 
@@ -92,20 +99,20 @@ function assistantWriteLeadEvent($modx, array $event): bool
             | JSON_THROW_ON_ERROR
         );
     } catch (JsonException $e) {
-        assistantLog($modx, 'Could not encode lead log event: ' . $e->getMessage());
+        assistantLog($modx, 'Could not encode lead log event.' . $context);
         return false;
     }
 
     $file = $dir . '/' . gmdate('Y-m') . '-AILeadLogs.jsonl';
 
-    $written = file_put_contents(
+    $written = @file_put_contents(
         $file,
         $line . "\n",
         FILE_APPEND | LOCK_EX
     );
 
-    if ($written === false) {
-        assistantLog($modx, 'Could not write lead log file: ' . $file);
+    if ($written !== strlen($line . "\n")) {
+        assistantLog($modx, 'Could not write complete lead JSONL event.' . $context);
         return false;
     }
 
@@ -299,16 +306,7 @@ function assistantSendLeadEmail(
     $sent = (bool)$mail->send();
 
     if (!$sent) {
-        $errorInfo = 'unknown mail error';
-        try {
-            if (isset($mail->mailer) && isset($mail->mailer->ErrorInfo)) {
-                $errorInfo = (string)$mail->mailer->ErrorInfo;
-            }
-        } catch (Throwable $e) {
-            // Keep fallback text.
-        }
-
-        assistantLog($modx, 'Could not send lead email: ' . $errorInfo);
+        assistantLog($modx, 'Could not send lead email.');
     }
 
     $mail->reset();
@@ -343,7 +341,7 @@ function assistantSendTelegram(
             JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR
         );
     } catch (JsonException $e) {
-        assistantLog($modx, 'Telegram gateway JSON error: ' . $e->getMessage());
+        assistantLog($modx, 'Could not encode Telegram gateway request.');
         return false;
     }
 
@@ -363,12 +361,11 @@ function assistantSendTelegram(
     ]);
 
     $result = curl_exec($ch);
-    $curlError = curl_error($ch);
     $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
 
     if ($result === false) {
-        assistantLog($modx, 'Telegram gateway connection error: ' . $curlError);
+        assistantLog($modx, 'Telegram gateway connection failed.');
         return false;
     }
 
@@ -378,11 +375,11 @@ function assistantSendTelegram(
         $httpCode < 200 ||
         $httpCode >= 300 ||
         !is_array($response) ||
-        empty($response['ok'])
+        ($response['ok'] ?? null) !== true
     ) {
         assistantLog(
             $modx,
-            'Telegram gateway error. HTTP ' . $httpCode . ': ' . mb_substr($result, 0, 1000)
+            'Telegram gateway failed. HTTP ' . $httpCode
         );
         return false;
     }
@@ -516,15 +513,28 @@ if (
     assistantRespond(['ok' => false, 'error' => 'Invalid conversation ID'], 422);
 }
 
-$conversationKey = 'portfolio_assistant_conversation';
+// Keep conversations inside the existing PHP session. Its lock serializes
+// concurrent retries through delivery; do not release it before handoff is saved.
+$conversationKey = 'portfolio_assistant_conversations';
 if (!isset($_SESSION[$conversationKey]) || !is_array($_SESSION[$conversationKey])) {
     $_SESSION[$conversationKey] = [];
 }
 
-$conversation = &$_SESSION[$conversationKey];
+// Preserve an in-progress or delivered conversation from the previous version.
+$legacy = $_SESSION['portfolio_assistant_conversation'] ?? null;
+if (is_array($legacy) && isset($legacy['conversation_id'], $legacy['email'])) {
+    $legacyKey = hash('sha256', $legacy['conversation_id'] . "\n" . $legacy['email']);
+    if (!isset($_SESSION[$conversationKey][$legacyKey])) {
+        $_SESSION[$conversationKey][$legacyKey] = $legacy;
+    }
+    unset($_SESSION['portfolio_assistant_conversation']);
+}
+unset($legacy);
 
-if (!isset($conversation['email']) || $conversation['email'] !== $email) {
-    $conversation = [
+// Email is part of identity, even if a stale client reuses an ID.
+$identityKey = hash('sha256', $conversationId . "\n" . $email);
+if (!isset($_SESSION[$conversationKey][$identityKey])) {
+    $_SESSION[$conversationKey][$identityKey] = [
         'email' => $email,
         'page_url' => $pageUrl,
         'conversation_id' => $conversationId,
@@ -533,30 +543,46 @@ if (!isset($conversation['email']) || $conversation['email'] !== $email) {
         'history' => [],
     ];
 }
+$conversation = &$_SESSION[$conversationKey][$identityKey];
 
-if ($action === 'contact') {
-    if (empty($conversation['contact_logged_at'])) {
-        $contactLogged = assistantWriteLeadEvent(
-            $modx,
-            array_merge(
-                assistantBaseLeadEvent($conversationId, $email, $pageUrl),
-                ['event' => 'contact_saved']
-            )
-        );
-
-        if ($contactLogged) {
-            $conversation['contact_logged_at'] = time();
-        }
-    }
-
-    $conversation['page_url'] = $pageUrl;
-    $conversation['updated_at'] = time();
-
-    assistantRespond(['ok' => true]);
+if ($action !== 'contact' && $action !== 'message') {
+    assistantRespond(['ok' => false, 'error' => 'Invalid action'], 422);
 }
 
-if ($action !== 'message') {
-    assistantRespond(['ok' => false, 'error' => 'Invalid action'], 422);
+// A replay after delivery reports the original result without calling AI or
+// sending notifications again, even if diagnostic logging is unavailable.
+if ($action === 'message' && !empty($conversation['handoff_sent_at'])) {
+    assistantRespond([
+        'ok' => true,
+        'message' => (string)($conversation['final_message'] ?? 'Your request has already been sent.'),
+        'handoff_sent' => true,
+        'handoff_channels' => (array)($conversation['handoff_channels'] ?? []),
+    ]);
+}
+
+if (empty($conversation['contact_logged_at'])) {
+    $contactLogged = assistantWriteLeadEvent(
+        $modx,
+        array_merge(
+            assistantBaseLeadEvent($conversationId, $email, $pageUrl),
+            ['event' => 'contact_saved']
+        )
+    );
+
+    if (!$contactLogged) {
+        assistantLog($modx, 'Could not save initial contact [conversation_id=' . $conversationId . ']');
+        assistantRespond([
+            'ok' => false,
+            'error' => 'Could not save your contact. Please try again.',
+        ], 503);
+    }
+    $conversation['contact_logged_at'] = time();
+}
+
+if ($action === 'contact') {
+    $conversation['page_url'] = $pageUrl;
+    $conversation['updated_at'] = time();
+    assistantRespond(['ok' => true]);
 }
 
 $messageLength = mb_strlen($message, 'UTF-8');
@@ -590,20 +616,6 @@ if (!isset($conversation['history']) || !is_array($conversation['history'])) {
     $conversation['history'] = [];
 }
 
-if (empty($conversation['contact_logged_at'])) {
-    $contactLogged = assistantWriteLeadEvent(
-        $modx,
-        array_merge(
-            assistantBaseLeadEvent($conversationId, $email, $pageUrl),
-            ['event' => 'contact_saved']
-        )
-    );
-
-    if ($contactLogged) {
-        $conversation['contact_logged_at'] = time();
-    }
-}
-
 if (empty($conversation['first_request_logged_at'])) {
     $firstRequestLogged = assistantWriteLeadEvent(
         $modx,
@@ -616,9 +628,10 @@ if (empty($conversation['first_request_logged_at'])) {
         )
     );
 
-    if ($firstRequestLogged) {
-        $conversation['first_request_logged_at'] = time();
+    if (!$firstRequestLogged) {
+        assistantRespond(['ok' => false, 'error' => 'Could not save your request. Please try again.'], 503);
     }
+    $conversation['first_request_logged_at'] = time();
 }
 
 // Build temporary request history. Commit it only after a successful turn.
@@ -766,12 +779,11 @@ curl_setopt_array($ch, [
 ]);
 
 $result = curl_exec($ch);
-$curlError = curl_error($ch);
 $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
 curl_close($ch);
 
 if ($result === false) {
-    assistantLog($modx, 'AI gateway connection error: ' . $curlError);
+    assistantLog($modx, 'AI gateway connection failed.');
     assistantRespond(['ok' => false, 'error' => 'Assistant connection failed'], 502);
 }
 
@@ -780,14 +792,13 @@ try {
 } catch (JsonException $e) {
     assistantLog(
         $modx,
-        'Invalid JSON returned by AI gateway. HTTP ' . $httpCode . '. Response: ' . mb_substr($result, 0, 2000)
+        'Invalid JSON returned by AI gateway. HTTP ' . $httpCode
     );
     assistantRespond(['ok' => false, 'error' => 'Invalid assistant response'], 502);
 }
 
 if ($httpCode < 200 || $httpCode >= 300) {
-    $upstreamError = $response['error']['message'] ?? 'Unknown upstream error';
-    assistantLog($modx, 'AI gateway error. HTTP ' . $httpCode . ': ' . $upstreamError);
+    assistantLog($modx, 'AI gateway error. HTTP ' . $httpCode);
 
     if ($httpCode === 429) {
         assistantRespond(['ok' => false, 'error' => 'Assistant temporarily busy'], 429);
@@ -806,7 +817,7 @@ if ($structuredText === '') {
 try {
     $turn = json_decode($structuredText, true, 32, JSON_THROW_ON_ERROR);
 } catch (JsonException $e) {
-    assistantLog($modx, 'Invalid structured assistant response: ' . $structuredText);
+    assistantLog($modx, 'Invalid structured assistant response.');
     assistantRespond(['ok' => false, 'error' => 'Invalid assistant response'], 502);
 }
 
@@ -836,7 +847,7 @@ if ($readyToHandoff && empty($conversation['handoff_sent_at'])) {
     } catch (Throwable $e) {
         assistantLog(
             $modx,
-            'Lead email exception: ' . get_class($e) . ': ' . $e->getMessage()
+            'Lead email exception: ' . get_class($e) . ' [conversation_id=' . $conversationId . ']'
         );
     }
 
@@ -853,12 +864,26 @@ if ($readyToHandoff && empty($conversation['handoff_sent_at'])) {
         } catch (Throwable $e) {
             assistantLog(
                 $modx,
-                'Telegram exception: ' . get_class($e) . ': ' . $e->getMessage()
+                'Telegram exception: ' . get_class($e) . ' [conversation_id=' . $conversationId . ']'
             );
         }
     }
 
     $handoffSent = $emailSent || $telegramSent;
+
+    if ($handoffSent) {
+        $conversation['handoff_sent_at'] = time();
+        $conversation['lead'] = $lead;
+        $conversation['handoff_channels'] = [
+            'email' => $emailSent,
+            'telegram' => $telegramSent,
+        ];
+
+        $reply = $handoffMessage !== '' ? $handoffMessage : 'Your request has been sent to the site owner.';
+        $conversation['final_message'] = $reply;
+    } else {
+        $reply = 'We could not send your request. Please try again.';
+    }
 
     assistantWriteLeadEvent(
         $modx,
@@ -875,19 +900,6 @@ if ($readyToHandoff && empty($conversation['handoff_sent_at'])) {
             ]
         )
     );
-
-    if ($handoffSent) {
-        $conversation['handoff_sent_at'] = time();
-        $conversation['lead'] = $lead;
-        $conversation['handoff_channels'] = [
-            'email' => $emailSent,
-            'telegram' => $telegramSent,
-        ];
-
-        if ($handoffMessage !== '') {
-            $reply = $handoffMessage;
-        }
-    }
 }
 
 // Commit the successful turn only now.

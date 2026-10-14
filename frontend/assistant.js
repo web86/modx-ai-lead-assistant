@@ -28,6 +28,14 @@ document.addEventListener('DOMContentLoaded', () => {
             assistant.dataset.textChatStart ||
             'Great! How can I help? Tell me a little about what you need.',
 
+        contactError:
+            assistant.dataset.textContactError ||
+            'Could not save your contact. Please press Continue to try again.',
+
+        newChat:
+            assistant.dataset.textNewChat ||
+            'Start a new conversation',
+
         emailError:
             assistant.dataset.textEmailError ||
             'Please enter a valid email.',
@@ -55,6 +63,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let isReplying = false;
     let typingElement = null;
+    let isSavingContact = false;
+    let transcript = [];
+    const emailInput = emailForm.querySelector('input[type="email"]');
+    const emailSubmit = emailForm.querySelector('button[type="submit"]');
+    const inputPlaceholder = chatInput.placeholder;
+    const newChatButton = document.createElement('button');
+    newChatButton.type = 'button';
+    newChatButton.className = 'fw-assistant-new-chat';
+    newChatButton.textContent = aiText.newChat;
+    newChatButton.hidden = true;
+    chatForm.parentElement.appendChild(newChatButton);
 
     function createConversationId() {
         if (window.crypto?.getRandomValues) {
@@ -141,7 +160,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return avatar;
     }
 
-    function addMessage(role, text) {
+    function addMessage(role, text, persist = true) {
         const row = document.createElement('div');
         row.className = `fw-assistant-chat-row ${role === 'assistant' ? 'is-assistant' : 'is-user'}`;
 
@@ -154,6 +173,15 @@ document.addEventListener('DOMContentLoaded', () => {
         bubble.textContent = text;
         row.appendChild(bubble);
         messages.appendChild(row);
+        if (persist) {
+            transcript.push({ role, text });
+            transcript = transcript.slice(-50);
+            sessionStorage.setItem('fwAssistantHistory', JSON.stringify({
+                conversationId: getConversationId(),
+                email: sessionStorage.getItem('fwAssistantEmail'),
+                messages: transcript
+            }));
+        }
         scrollToBottom();
         return row;
     }
@@ -197,20 +225,41 @@ document.addEventListener('DOMContentLoaded', () => {
         chatInput.disabled = true;
         chatInput.placeholder = aiText.handoffSent;
         sendButton.disabled = true;
-        sessionStorage.setItem('fwAssistantHandoffSent', '1');
+        sessionStorage.setItem('fwAssistantHandoffSent', getConversationId());
+        newChatButton.hidden = false;
     }
 
     function startChat(restored = false) {
         assistant.classList.add('is-chatting');
         emailCard.style.display = 'none';
 
-        if (sessionStorage.getItem('fwAssistantHandoffSent') === '1') {
+        if (restored) {
+            try {
+                const saved = JSON.parse(sessionStorage.getItem('fwAssistantHistory') || 'null');
+                if (saved?.conversationId === getConversationId() && saved.email === sessionStorage.getItem('fwAssistantEmail') && Array.isArray(saved.messages)) {
+                    transcript = saved.messages.slice(-50).filter(item =>
+                        (item.role === 'assistant' || item.role === 'user') && typeof item.text === 'string'
+                    );
+                    transcript.forEach(item => addMessage(item.role, item.text, false));
+                }
+            } catch (error) {
+                sessionStorage.removeItem('fwAssistantHistory');
+            }
+        }
+
+        if (sessionStorage.getItem('fwAssistantHandoffSent') === getConversationId()) {
+            if (!transcript.length) {
+                addMessage('assistant', aiText.handoffSent);
+            }
             finishChat();
             return;
         }
 
         if (restored) {
-            addMessage('assistant', aiText.welcomeBack);
+            if (!transcript.length) {
+                addMessage('assistant', aiText.welcomeBack);
+            }
+            updateSendButton();
             return;
         }
 
@@ -318,45 +367,87 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    emailForm.addEventListener('submit', async event => {
-        event.preventDefault();
-
-        const input = emailForm.querySelector('input[type="email"]');
-        const email = input.value.trim();
-
-        input.classList.remove('is-invalid');
+    function showEmailError(text) {
         emailForm.querySelector('.fw-assistant-email-error')?.remove();
+        const error = document.createElement('div');
+        error.className = 'fw-assistant-email-error';
+        error.setAttribute('role', 'alert');
+        error.textContent = text;
+        emailInput.insertAdjacentElement('afterend', error);
+    }
 
-        if (!isValidEmail(email)) {
-            input.classList.add('is-invalid');
+    function resetConversation(email = '') {
+        for (const key of ['fwAssistantEmail', 'fwAssistantConversationId', 'fwAssistantHandoffSent', 'fwAssistantHistory', 'fwAssistantPendingEmail']) {
+            sessionStorage.removeItem(key);
+        }
+        transcript = [];
+        messages.querySelectorAll('.fw-assistant-chat-row').forEach(row => row.remove());
+        assistant.classList.remove('is-chatting');
+        emailCard.classList.remove('is-leaving');
+        emailCard.style.display = '';
+        emailForm.querySelector('.fw-assistant-email-error')?.remove();
+        emailInput.value = email;
+        chatInput.value = '';
+        chatInput.disabled = false;
+        chatInput.placeholder = inputPlaceholder;
+        newChatButton.hidden = true;
+        updateSendButton();
+    }
 
-            const error = document.createElement('div');
-            error.className = 'fw-assistant-email-error';
-            error.textContent = aiText.emailError;
-            input.insertAdjacentElement('afterend', error);
-            input.focus();
+    newChatButton.addEventListener('click', () => {
+        if (isReplying || isSavingContact) {
             return;
         }
+        const email = sessionStorage.getItem('fwAssistantEmail') || '';
+        resetConversation(email);
+        emailInput.focus();
+    });
 
-        sessionStorage.setItem('fwAssistantEmail', email);
-        sessionStorage.removeItem('fwAssistantHandoffSent');
-
-        if (!sessionStorage.getItem('fwAssistantConversationId')) {
-            sessionStorage.setItem(
-                'fwAssistantConversationId',
-                createConversationId()
-            );
+    async function confirmContact(email, restored = false) {
+        if (isSavingContact) {
+            return;
         }
-
+        isSavingContact = true;
+        emailSubmit.disabled = true;
+        emailInput.disabled = true;
+        sessionStorage.setItem('fwAssistantPendingEmail', email);
+        // Reserve the ID before sending. A failed/lost response can be retried
+        // with the same identity without producing another contact event.
+        getConversationId();
         try {
             await saveContact(email);
+            sessionStorage.setItem('fwAssistantEmail', email);
+            sessionStorage.removeItem('fwAssistantPendingEmail');
+            startChat(restored);
         } catch (error) {
-            console.error(error);
+            sessionStorage.removeItem('fwAssistantEmail');
+            showEmailError(aiText.contactError);
+        } finally {
+            isSavingContact = false;
+            emailSubmit.disabled = false;
+            emailInput.disabled = false;
         }
+    }
 
-        emailCard.classList.add('is-leaving');
-
-        setTimeout(() => startChat(false), 250);
+    emailForm.addEventListener('submit', async event => {
+        event.preventDefault();
+        if (isSavingContact) {
+            return;
+        }
+        const email = emailInput.value.trim();
+        emailInput.classList.remove('is-invalid');
+        emailForm.querySelector('.fw-assistant-email-error')?.remove();
+        if (!isValidEmail(email)) {
+            emailInput.classList.add('is-invalid');
+            showEmailError(aiText.emailError);
+            emailInput.focus();
+            return;
+        }
+        const previousEmail = sessionStorage.getItem('fwAssistantPendingEmail') || sessionStorage.getItem('fwAssistantEmail');
+        if (previousEmail && previousEmail !== email) {
+            resetConversation(email);
+        }
+        await confirmContact(email, Boolean(sessionStorage.getItem('fwAssistantHistory')));
     });
 
     chatInput.addEventListener('input', () => {
@@ -379,7 +470,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const text = chatInput.value.trim();
 
-        if (!text || isReplying || chatInput.disabled) {
+        if (!text || isReplying || isSavingContact || chatInput.disabled || !sessionStorage.getItem('fwAssistantEmail') || sessionStorage.getItem('fwAssistantHandoffSent') === getConversationId()) {
             return;
         }
 
@@ -402,12 +493,14 @@ document.addEventListener('DOMContentLoaded', () => {
             hideTyping();
 
             if (error.message === 'ASSISTANT_BUSY') {
-                addMessage('assistant', aiText.busy);
+                addMessage('assistant', aiText.busy, false);
             } else {
-                addMessage('assistant', aiText.requestError);
+                addMessage('assistant', aiText.requestError, false);
             }
 
-            console.error(error);
+            // Keep the request available for an explicit retry.
+            chatInput.value = text;
+            resizeTextarea();
         } finally {
             isReplying = false;
             updateSendButton();
@@ -419,13 +512,26 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     const savedEmail = sessionStorage.getItem('fwAssistantEmail');
-
+    const pendingEmail = sessionStorage.getItem('fwAssistantPendingEmail');
     if (savedEmail && isValidEmail(savedEmail)) {
-        startChat(true);
-    } else if (savedEmail) {
+        emailInput.value = savedEmail;
+        // Migrate a completed conversation from the old browser format once.
+        if (sessionStorage.getItem('fwAssistantHandoffSent') === '1') {
+            sessionStorage.setItem('fwAssistantHandoffSent', getConversationId());
+        }
+        if (sessionStorage.getItem('fwAssistantHandoffSent') === getConversationId()) {
+            startChat(true);
+        } else {
+            // Revalidate old saved emails too: the previous frontend could save
+            // an email locally even though the server failed to log it.
+            confirmContact(savedEmail, true);
+        }
+    } else if (pendingEmail && isValidEmail(pendingEmail)) {
+        emailInput.value = pendingEmail;
         sessionStorage.removeItem('fwAssistantEmail');
-        sessionStorage.removeItem('fwAssistantHandoffSent');
-        sessionStorage.removeItem('fwAssistantConversationId');
+        showEmailError(aiText.contactError);
+    } else if (savedEmail || pendingEmail || sessionStorage.getItem('fwAssistantConversationId') || sessionStorage.getItem('fwAssistantHandoffSent') || sessionStorage.getItem('fwAssistantHistory')) {
+        resetConversation();
     }
 
     /*

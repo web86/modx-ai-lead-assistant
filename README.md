@@ -429,3 +429,15 @@ Sent
 Only the data needed to recover the lead is stored: email, source page, first request, and — when handoff is attempted — the same compact lead fields used for Telegram (`name`, `website`, `request`, `summary`) plus delivery-channel results. IP addresses and User-Agent strings are not stored.
 
 The viewers support period/status/contact/request filtering and CSV export.
+
+### MODX 2 conversation lifecycle fix
+
+MODX 2 now isolates conversations by ID and email within the existing PHP session.
+A failed contact journal write blocks chat startup with a retryable error, while
+intentional disabled logging remains supported. The shared widget preserves the
+conversation ID and visible transcript across refreshes and offers **Start a new
+conversation** after confirmed delivery. The delivery flag belongs to that ID.
+
+For behavior, translation options, and updating files without deleting logs or
+resetting sessions, see [the MODX 2 guide](modx/README.md#conversation-lifecycle-and-recovery).
+Regression commands and environment limitations are in [tests/README.md](tests/README.md).

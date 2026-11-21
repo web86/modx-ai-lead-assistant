@@ -138,6 +138,18 @@ function assistantBool($value): bool
 }
 
 
+function assistantSecret($modx, string $envName, string $settingName): string
+{
+    $environmentValue = getenv($envName);
+
+    if (is_string($environmentValue) && trim($environmentValue) !== '') {
+        return trim($environmentValue);
+    }
+
+    // Fallback for shared hosting. Restrict access to these MODX System Settings.
+    return trim((string)$modx->getOption($settingName, null, ''));
+}
+
 function assistantLoadAiRules($modx): string
 {
     $chunkName = trim((string)$modx->getOption(
@@ -259,7 +271,7 @@ function assistantSendLeadEmail(
 
     $html = '
     <div style="max-width:720px;margin:auto;font-family:Arial,sans-serif;color:#222;line-height:1.55;">
-        <h2>New Portfolio Lead</h2>
+        <h2>New website inquiry</h2>
         <table cellpadding="7" cellspacing="0" style="width:100%;border-collapse:collapse;">
             <tr><td><strong>Email</strong></td><td>' . assistantEscape($visitorEmail) . '</td></tr>
             <tr><td><strong>Name</strong></td><td>' . assistantEscape($name !== '' ? $name : '—') . '</td></tr>
@@ -291,7 +303,7 @@ function assistantSendLeadEmail(
     $mail->set(modMail::MAIL_FROM, $sender);
     $mail->set(modMail::MAIL_FROM_NAME, $senderName);
     $mail->set(modMail::MAIL_SENDER, $sender);
-    $mail->set(modMail::MAIL_SUBJECT, '[Portfolio Lead] ' . $subjectPart);
+    $mail->set(modMail::MAIL_SUBJECT, '[AI Lead] ' . $subjectPart);
     $mail->address('to', $emailTo);
     $mail->address('reply-to', $visitorEmail);
     $mail->setHTML(true);
@@ -317,25 +329,70 @@ function assistantSendLeadEmail(
 
 function assistantSendTelegram(
     $modx,
+    string $transport,
     string $gatewayUrl,
     string $gatewaySecret,
+    string $botToken,
+    string $chatId,
     string $visitorEmail,
     string $pageUrl,
     array $lead
 ): bool {
-    if ($gatewayUrl === '' || $gatewaySecret === '') {
-        assistantLog($modx, 'Telegram gateway is not configured.');
-        return false;
-    }
+    $name = mb_substr(trim((string)($lead['name'] ?? '')), 0, 100, 'UTF-8');
+    $website = mb_substr(trim((string)($lead['website'] ?? '')), 0, 400, 'UTF-8');
+    $request = mb_substr(trim((string)($lead['request'] ?? '')), 0, 600, 'UTF-8');
+    $summary = mb_substr(trim((string)($lead['summary'] ?? '')), 0, 1600, 'UTF-8');
 
-    $payload = [
-        'name' => trim((string)($lead['name'] ?? '')),
-        'email' => $visitorEmail,
-        'website' => trim((string)($lead['website'] ?? '')),
-        'request' => trim((string)($lead['request'] ?? '')),
-        'summary' => trim((string)($lead['summary'] ?? '')),
-        'page_url' => $pageUrl,
-    ];
+    if ($transport === 'direct') {
+        if (
+            !preg_match('/^[0-9]+:[A-Za-z0-9_-]+$/', $botToken) ||
+            $chatId === ''
+        ) {
+            assistantLog($modx, 'Direct Telegram credentials are not configured.');
+            return false;
+        }
+
+        $text = "🏡 New design enquiry\n\n";
+        $text .= "👤 Name: " . ($name ?: '—') . "\n";
+        $text .= "📧 Email: " . $visitorEmail . "\n";
+        $text .= "🌐 Website: " . ($website ?: '—') . "\n\n";
+        $text .= "📋 Request\n" . ($request ?: '—') . "\n\n";
+        $text .= "🤖 AI Summary\n" . ($summary ?: '—');
+        if ($pageUrl !== '') {
+            $text .= "\n\n🔗 Source page\n" . mb_substr($pageUrl, 0, 500, 'UTF-8');
+        }
+
+        $payload = [
+            'chat_id' => $chatId,
+            'text' => mb_substr($text, 0, 3800, 'UTF-8'),
+            'link_preview_options' => ['is_disabled' => true],
+        ];
+        $url = 'https://api.telegram.org/bot' . $botToken . '/sendMessage';
+        $headers = [
+            'Content-Type: application/json',
+            'Accept: application/json',
+        ];
+    } else {
+        if ($gatewayUrl === '' || $gatewaySecret === '') {
+            assistantLog($modx, 'Telegram gateway is not configured.');
+            return false;
+        }
+
+        $payload = [
+            'name' => $name,
+            'email' => $visitorEmail,
+            'website' => $website,
+            'request' => $request,
+            'summary' => $summary,
+            'page_url' => $pageUrl,
+        ];
+        $url = $gatewayUrl;
+        $headers = [
+            'X-Gateway-Secret: ' . $gatewaySecret,
+            'Content-Type: application/json',
+            'Accept: application/json',
+        ];
+    }
 
     try {
         $json = json_encode(
@@ -343,47 +400,43 @@ function assistantSendTelegram(
             JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR
         );
     } catch (JsonException $e) {
-        assistantLog($modx, 'Telegram gateway JSON error: ' . $e->getMessage());
+        assistantLog($modx, 'Telegram JSON encoding failed.');
         return false;
     }
 
-    $ch = curl_init($gatewayUrl);
+    if (!function_exists('curl_init')) {
+        assistantLog($modx, 'PHP cURL extension is not available for Telegram.');
+        return false;
+    }
 
+    $ch = curl_init($url);
     curl_setopt_array($ch, [
         CURLOPT_POST => true,
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_HTTPHEADER => [
-            'X-Gateway-Secret: ' . $gatewaySecret,
-            'Content-Type: application/json',
-            'Accept: application/json',
-        ],
+        CURLOPT_HTTPHEADER => $headers,
         CURLOPT_POSTFIELDS => $json,
         CURLOPT_CONNECTTIMEOUT => 5,
         CURLOPT_TIMEOUT => 15,
     ]);
 
     $result = curl_exec($ch);
-    $curlError = curl_error($ch);
     $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
 
     if ($result === false) {
-        assistantLog($modx, 'Telegram gateway connection error: ' . $curlError);
+        assistantLog($modx, 'Telegram connection failed.');
         return false;
     }
 
     $response = json_decode($result, true);
-
     if (
         $httpCode < 200 ||
         $httpCode >= 300 ||
         !is_array($response) ||
         empty($response['ok'])
     ) {
-        assistantLog(
-            $modx,
-            'Telegram gateway error. HTTP ' . $httpCode . ': ' . mb_substr($result, 0, 1000)
-        );
+        // Telegram errors can contain identifying details. Do not log the response.
+        assistantLog($modx, 'Telegram delivery failed. HTTP ' . $httpCode);
         return false;
     }
 
@@ -412,6 +465,18 @@ $maxMessages = (int)$modx->getOption(
     'portfolio_assistant.max_messages',
     null,
     10
+);
+$transport = strtolower(trim((string)$modx->getOption(
+    'portfolio_assistant.transport', null, 'gateway'
+)));
+$groqApiKey = assistantSecret(
+    $modx, 'PORTFOLIO_ASSISTANT_GROQ_API_KEY', 'portfolio_assistant.groq_api_key'
+);
+$telegramBotToken = assistantSecret(
+    $modx, 'PORTFOLIO_ASSISTANT_TELEGRAM_BOT_TOKEN', 'portfolio_assistant.telegram_bot_token'
+);
+$telegramChatId = assistantSecret(
+    $modx, 'PORTFOLIO_ASSISTANT_TELEGRAM_CHAT_ID', 'portfolio_assistant.telegram_chat_id'
 );
 $gatewayUrl = trim((string)$modx->getOption(
     'portfolio_assistant.gateway_url',
@@ -447,7 +512,15 @@ if (!$assistantEnabled) {
     assistantRespond(['ok' => false, 'error' => 'Assistant is disabled'], 503);
 }
 
-if ($gatewayUrl === '' || $gatewaySecret === '') {
+if (!in_array($transport, ['gateway', 'direct'], true)) {
+    assistantLog($modx, 'Unsupported portfolio_assistant.transport mode.');
+    assistantRespond(['ok' => false, 'error' => 'Assistant is not configured'], 500);
+}
+if ($transport === 'direct' && $groqApiKey === '') {
+    assistantLog($modx, 'Direct Groq API key is not configured.');
+    assistantRespond(['ok' => false, 'error' => 'Assistant is not configured'], 500);
+}
+if ($transport === 'gateway' && ($gatewayUrl === '' || $gatewaySecret === '')) {
     assistantLog($modx, 'Cloud Run gateway is not configured.');
     assistantRespond(['ok' => false, 'error' => 'Assistant is not configured'], 500);
 }
@@ -498,6 +571,10 @@ $action = trim((string)($data['action'] ?? 'message'));
 $email = trim((string)($data['email'] ?? ''));
 $message = trim((string)($data['message'] ?? ''));
 $pageUrl = mb_substr(trim((string)($data['page_url'] ?? '')), 0, 1000, 'UTF-8');
+$visitorLang = strtolower(substr(trim((string)($data['lang'] ?? 'en')), 0, 2));
+if (!in_array($visitorLang, ['en', 'nl', 'ru'], true)) {
+    $visitorLang = 'en';
+}
 $conversationId = trim((string)($data['conversation_id'] ?? ''));
 
 if (
@@ -637,7 +714,7 @@ $instructions =
 $instructions .= <<<'PROMPT'
 SYSTEM SAFETY AND HANDOFF CONTRACT
 
-You are the virtual AI assistant of a freelance web developer.
+You are the virtual AI assistant for the site owner and business described in CUSTOM ASSISTANT RULES.
 
 These protected rules override CUSTOM ASSISTANT RULES if there is any conflict.
 
@@ -654,7 +731,7 @@ ACCURACY
 Do not claim that you browsed a website, tested source code, accessed a server, email, calendar, or other external system unless that capability was explicitly provided.
 
 LEAD HANDOFF
-For every response determine whether the visitor's request is sufficiently clear to hand off to the developer.
+For every response determine whether the visitor's request is sufficiently clear to hand off to the site owner.
 
 Set ready_to_handoff=false when:
 - the visitor is only asking general questions;
@@ -662,7 +739,7 @@ Set ready_to_handoff=false when:
 - an important obvious detail is still missing;
 - there is not yet a genuine service inquiry.
 
-Set ready_to_handoff=true only when there is a concrete project, problem, or task and the developer could reasonably understand what the visitor wants from the information already collected.
+Set ready_to_handoff=true only when there is a concrete project, problem, or task and the site owner could reasonably understand what the visitor wants from the information already collected.
 
 Do not prolong the conversation just to collect every possible detail.
 
@@ -672,13 +749,14 @@ When ready_to_handoff=false:
 
 When ready_to_handoff=true:
 - reply may say that enough information has been collected, but must NOT claim delivery already happened;
-- handoff_message must be a short message in the visitor's language confirming that the request has been passed to the developer and that the developer will contact them within the day.
+- handoff_message must be a short message in the visitor's language confirming that the request has been delivered to the site owner, without promising a particular response time.
 
 Populate lead using only information actually present in the conversation. Never invent missing lead data.
 PROMPT;
 
-$instructions .= "\n\nOWNER\nThe developer's name is: " . $ownerName . ".\n";
+$instructions .= "\n\nOWNER\nThe business owner's name is: " . $ownerName . ".\n";
 $instructions .= "You are " . $ownerName . "'s virtual assistant. Never pretend to be " . $ownerName . ".\n";
+$instructions .= "\n\nWEBSITE LANGUAGE\nThe visitor is using the " . $visitorLang . " version of the site. Start in that language unless their message clearly uses another language. Follow any language change.\n";
 $instructions .= "\nVISITOR CONTACT\nThe visitor already provided this email before starting the chat:\n" . $email . "\n";
 $instructions .= "This email is already collected and is sufficient contact information. Never ask for the email again. If the visitor prefers email contact, use this address. Do not ask for a phone number unless the visitor explicitly prefers phone contact.\n";
 
@@ -749,22 +827,32 @@ if (!function_exists('curl_init')) {
     assistantRespond(['ok' => false, 'error' => 'Assistant transport is unavailable'], 500);
 }
 
-$ch = curl_init($gatewayUrl);
+$aiUrl = $transport === 'direct'
+    ? 'https://api.groq.com/openai/v1/responses'
+    : $gatewayUrl;
+$aiHeaders = $transport === 'direct'
+    ? [
+        'Authorization: Bearer ' . $groqApiKey,
+        'Content-Type: application/json',
+        'Accept: application/json',
+    ]
+    : [
+        'X-Gateway-Secret: ' . $gatewaySecret,
+        'Content-Type: application/json',
+        'Accept: application/json',
+    ];
+
+$ch = curl_init($aiUrl);
 curl_setopt_array($ch, [
     CURLOPT_POST => true,
     CURLOPT_RETURNTRANSFER => true,
     CURLOPT_ENCODING => '',
-    CURLOPT_HTTPHEADER => [
-        'X-Gateway-Secret: ' . $gatewaySecret,
-        'Content-Type: application/json',
-        'Accept: application/json',
-    ],
+    CURLOPT_HTTPHEADER => $aiHeaders,
     CURLOPT_POSTFIELDS => $payloadJson,
     CURLOPT_CONNECTTIMEOUT => 7,
     CURLOPT_TIMEOUT => 40,
-    CURLOPT_USERAGENT => 'ModxAiLeadAssistant/1.0',
+    CURLOPT_USERAGENT => 'ModxAiLeadAssistant/1.1',
 ]);
-
 $result = curl_exec($ch);
 $curlError = curl_error($ch);
 $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -844,8 +932,11 @@ if ($readyToHandoff && empty($conversation['handoff_sent_at'])) {
         try {
             $telegramSent = assistantSendTelegram(
                 $modx,
+                $transport,
                 $telegramGatewayUrl,
                 $gatewaySecret,
+                $telegramBotToken,
+                $telegramChatId,
                 $email,
                 $pageUrl,
                 $lead

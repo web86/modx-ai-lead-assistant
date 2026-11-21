@@ -244,6 +244,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 action: 'contact',
                 email,
                 page_url: window.location.href,
+                lang: (document.documentElement.lang || 'en').slice(0, 2).toLowerCase(),
                 conversation_id: getConversationId()
             })
         });
@@ -278,6 +279,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 email,
                 message,
                 page_url: window.location.href,
+                lang: (document.documentElement.lang || 'en').slice(0, 2).toLowerCase(),
                 conversation_id: getConversationId()
             })
         });
